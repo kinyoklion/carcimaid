@@ -1,15 +1,43 @@
 //! SVG emission from a laid-out diagram.
 //!
-//! The element hierarchy here is a first approximation. Because the project's
-//! compliance target is **structural** SVG comparison against the mermaid CLI,
-//! this module will be aligned to mermaid's actual DOM (group classes like
-//! `.nodes`, `.edgePaths`, `.edgeLabels`, `.clusters`, per-node `g.node`
-//! wrappers, arrowhead `<marker>` defs) once the structure is documented. For
-//! now it emits a valid, self-describing SVG so the pipeline runs end to end.
+//! The output is aligned to the DOM that mermaid's flowchart renderer produces
+//! when run with `htmlLabels: false` (SVG `<text>` labels rather than HTML
+//! `foreignObject`s), because the project's compliance target is a *structural*
+//! diff against the mermaid CLI. The hierarchy mirrors mermaid:
+//!
+//! ```text
+//! svg.flowchart
+//!   style
+//!   g                         (wrapper)
+//!     marker × 12             (arrowheads)
+//!     g.root
+//!       g.clusters
+//!       g.edgePaths > path.flowchart-link
+//!       g.edgeLabels > g.edgeLabel > g.label > … > text
+//!       g.nodes > g.node > shape.label-container + g.label > … > text
+//!   defs (drop-shadow filter)
+//!   defs (drop-shadow-small filter)
+//! ```
+//!
+//! Geometry is still produced by the placeholder layout, so numeric
+//! coordinates do not yet match mermaid — but the *structure* does, which is
+//! what the structural comparator keys on first. See `ATTRIBUTION.md`.
+
+mod markers;
 
 use crate::ir::NodeShape;
-use crate::layout::{LaidOut, LaidOutFlowchart, PlacedNode};
+use crate::layout::{LaidOut, LaidOutFlowchart, PlacedEdge, PlacedNode};
 use std::fmt::Write;
+
+/// Diagram id prefix. mermaid generates a per-render id (`my-svg`, etc.); the
+/// exact value is irrelevant to structural comparison (ids are ignored) but it
+/// must be internally consistent between markers and the edges that reference
+/// them. We use `my-svg` to match the id the mermaid CLI assigns by default, so
+/// `marker-end="url(#...)"` references compare equal.
+const ID: &str = "my-svg";
+
+/// Approximate single-line label height in px (mermaid ~19 at 16px font).
+const LABEL_HEIGHT: f64 = 19.0;
 
 /// Render a laid-out diagram to an SVG document string.
 pub fn to_svg(diagram: &LaidOut) -> String {
@@ -20,19 +48,41 @@ pub fn to_svg(diagram: &LaidOut) -> String {
 
 fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     let mut s = String::new();
+    let (w, h) = (round(chart.width), round(chart.height));
     let _ = write!(
         s,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">"#,
-        w = round(chart.width),
-        h = round(chart.height),
+        concat!(
+            r#"<svg id="{id}" width="{w}" xmlns="http://www.w3.org/2000/svg" "#,
+            r#"xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" "#,
+            r#"height="{h}" viewBox="0 0 {w} {h}" role="graphics-document document" "#,
+            r#"aria-roledescription="flowchart-v2" style="background-color: white;">"#,
+        ),
+        id = ID,
+        w = w,
+        h = h,
     );
+
+    // 1. <style> — mermaid emits a large CSS block here; we emit an empty one
+    //    to keep the child structure aligned. The comparator ignores <style>
+    //    text content.
+    s.push_str("<style></style>");
+
+    // 2. wrapper <g> with markers + g.root
+    s.push_str("<g>");
+    s.push_str(&markers::block(ID));
     s.push_str(r#"<g class="root">"#);
 
-    // Edges first so nodes paint over their endpoints.
+    s.push_str(r#"<g class="clusters"></g>"#);
+
     s.push_str(r#"<g class="edgePaths">"#);
     for edge in &chart.edges {
-        let d = path_d(&edge.points);
-        let _ = write!(s, r#"<path class="edge" d="{d}" fill="none"/>"#);
+        render_edge_path(&mut s, edge, &chart.nodes);
+    }
+    s.push_str("</g>");
+
+    s.push_str(r#"<g class="edgeLabels">"#);
+    for edge in &chart.edges {
+        render_edge_label(&mut s, edge, &chart.nodes);
     }
     s.push_str("</g>");
 
@@ -42,91 +92,178 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     }
     s.push_str("</g>");
 
-    s.push_str("</g></svg>");
+    s.push_str("</g></g>"); // close g.root and wrapper g
+
+    // 3. drop-shadow filter defs (verbatim mermaid).
+    let _ = write!(
+        s,
+        concat!(
+            r#"<defs><filter id="{id}-drop-shadow" height="130%" width="130%">"#,
+            r##"<feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/>"##,
+            r#"</filter></defs>"#,
+            r#"<defs><filter id="{id}-drop-shadow-small" height="150%" width="150%">"#,
+            r##"<feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/>"##,
+            r#"</filter></defs>"#,
+        ),
+        id = ID,
+    );
+
+    s.push_str("</svg>");
     s
 }
 
 fn render_node(s: &mut String, node: &PlacedNode) {
-    let x = node.cx - node.width / 2.0;
-    let y = node.cy - node.height / 2.0;
-    let _ = write!(s, r#"<g class="node" id="{}">"#, escape(&node.id));
+    let _ = write!(
+        s,
+        r#"<g class="node default" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
+        ID,
+        escape(&node.id),
+        round(node.cx),
+        round(node.cy),
+    );
+    render_shape(s, node);
+    // g.label is offset up by half the label height, matching mermaid.
+    let _ = write!(
+        s,
+        r#"<g class="label" transform="translate(0, {})"><rect/><g>"#,
+        round(-LABEL_HEIGHT / 2.0),
+    );
+    s.push_str(r#"<rect class="background"/>"#);
+    render_text(s, Some(&node.label), false);
+    s.push_str("</g></g></g>");
+}
+
+/// Emit the node's outline shape, centred at the group origin.
+fn render_shape(s: &mut String, node: &PlacedNode) {
+    let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     match node.shape {
         NodeShape::Rectangle => {
             let _ = write!(
                 s,
-                r#"<rect class="basic" x="{}" y="{}" width="{}" height="{}"/>"#,
-                round(x),
-                round(y),
+                r#"<rect class="basic label-container" x="{}" y="{}" width="{}" height="{}"/>"#,
+                round(-hw),
+                round(-hh),
                 round(node.width),
-                round(node.height)
+                round(node.height),
             );
         }
         NodeShape::RoundedRectangle | NodeShape::Stadium => {
-            let rx = if matches!(node.shape, NodeShape::Stadium) {
-                node.height / 2.0
-            } else {
-                5.0
-            };
+            let rx = if matches!(node.shape, NodeShape::Stadium) { hh } else { 5.0 };
             let _ = write!(
                 s,
-                r#"<rect class="basic" x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}"/>"#,
-                round(x),
-                round(y),
+                r#"<rect class="basic label-container" x="{}" y="{}" rx="{}" ry="{}" width="{}" height="{}"/>"#,
+                round(-hw),
+                round(-hh),
+                round(rx),
+                round(rx),
                 round(node.width),
                 round(node.height),
-                round(rx),
-                round(rx)
             );
         }
         NodeShape::Circle => {
             let r = node.width.max(node.height) / 2.0;
-            let _ = write!(
-                s,
-                r#"<circle class="basic" cx="{}" cy="{}" r="{}"/>"#,
-                round(node.cx),
-                round(node.cy),
-                round(r)
-            );
+            let _ = write!(s, r#"<circle class="basic label-container" r="{}"/>"#, round(r));
         }
         NodeShape::Rhombus => {
-            let (cx, cy) = (node.cx, node.cy);
-            let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+            // Diamond around the origin.
             let _ = write!(
                 s,
-                r#"<polygon class="basic" points="{},{} {},{} {},{} {},{}"/>"#,
-                round(cx),
-                round(cy - hh),
-                round(cx + hw),
-                round(cy),
-                round(cx),
-                round(cy + hh),
-                round(cx - hw),
-                round(cy)
+                r#"<polygon class="label-container" points="{},0 {},{} 0,{} {},{}"/>"#,
+                round(hw),
+                round(node.width),
+                round(-hh),
+                round(-node.height),
+                round(-hw),
+                round(-hh),
             );
         }
     }
+}
+
+/// `L_<fromId>_<toId>_0`, mermaid's stable edge id (uses node ids, not indices).
+fn edge_id(edge: &PlacedEdge, nodes: &[PlacedNode]) -> String {
+    format!("L_{}_{}_0", nodes[edge.from].id, nodes[edge.to].id)
+}
+
+fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
+    let d = path_d(&edge.points);
     let _ = write!(
         s,
-        r#"<text class="label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central">{}</text>"#,
-        round(node.cx),
-        round(node.cy),
-        escape(&node.label)
+        concat!(
+            r#"<path id="{id}-{eid}" "#,
+            r#"class="edge-thickness-normal edge-pattern-solid flowchart-link" "#,
+            r#"d="{d}" data-edge="true" data-et="edge" data-id="{eid}" data-look="classic" "#,
+            r#"marker-end="url(#{id}_flowchart-v2-pointEnd)"/>"#,
+        ),
+        id = ID,
+        eid = edge_id(edge, nodes),
+        d = d,
     );
-    s.push_str("</g>");
+}
+
+/// Emit the edge label. mermaid's structure differs for labelled vs unlabelled
+/// edges (see the comments below), so we mirror both exactly.
+fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
+    let eid = edge_id(edge, nodes);
+    match &edge.label {
+        Some(label) => {
+            // Labelled: g.edgeLabel[transform] > g.label[data-id] > g >
+            //           (rect.background + text).
+            let _ = write!(
+                s,
+                r#"<g class="edgeLabel"><g class="label" data-id="{eid}" transform="translate(0, -10.5)"><g>"#,
+            );
+            s.push_str(r#"<rect class="background"/>"#);
+            render_text(s, Some(label), true);
+            s.push_str("</g></g></g>");
+        }
+        None => {
+            // Unlabelled: an empty g.edgeLabel plus a sibling g holding only the
+            // background rect — exactly what mermaid emits.
+            let _ = write!(
+                s,
+                r#"<g class="edgeLabel"><g class="label" data-id="{eid}" transform="translate(0, 0)">"#,
+            );
+            render_text(s, None, true);
+            s.push_str(r#"</g></g><g><rect class="background"/></g>"#);
+        }
+    }
+}
+
+/// Emit mermaid's nested `<text><tspan.outer><tspan.inner>` label structure.
+/// With `label = None` the inner tspan is omitted (mermaid self-closes the
+/// outer tspan for empty labels). `anchor` adds `text-anchor="middle"`, which
+/// mermaid sets on edge labels but not node labels.
+fn render_text(s: &mut String, label: Option<&str>, anchor: bool) {
+    let ta = if anchor { r#" text-anchor="middle""# } else { "" };
+    let _ = write!(
+        s,
+        r#"<text y="{y}"{ta}><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"{ta}>"#,
+        y = round(-LABEL_HEIGHT / 2.0 - 0.6),
+        ta = ta,
+    );
+    if let Some(label) = label {
+        let _ = write!(
+            s,
+            r#"<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">{}</tspan>"#,
+            escape(label),
+        );
+    }
+    s.push_str("</tspan></text>");
 }
 
 fn path_d(points: &[(f64, f64)]) -> String {
     let mut d = String::new();
     for (i, (x, y)) in points.iter().enumerate() {
         let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(d, "{cmd}{},{} ", round(*x), round(*y));
+        let _ = write!(d, "{cmd}{},{}", round(*x), round(*y));
     }
-    d.trim_end().to_string()
+    d
 }
 
 /// Round to a stable precision so output is deterministic and diff-friendly.
 fn round(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
+    (v * 1000.0).round() / 1000.0
 }
 
 fn escape(s: &str) -> String {
@@ -141,11 +278,17 @@ mod tests {
     use crate::render_to_svg;
 
     #[test]
-    fn renders_valid_svg_root() {
+    fn renders_mermaid_aligned_structure() {
         let svg = render_to_svg("flowchart TD\n A[Start] --> B[End]").unwrap();
         assert!(svg.starts_with("<svg"));
-        assert!(svg.contains("class=\"nodes\""));
-        assert!(svg.contains("class=\"edgePaths\""));
-        assert!(svg.trim_end().ends_with("</svg>"));
+        assert!(svg.contains(r#"class="flowchart""#));
+        assert!(svg.contains(r#"aria-roledescription="flowchart-v2""#));
+        assert!(svg.contains(r#"<g class="nodes">"#));
+        assert!(svg.contains(r#"<g class="edgePaths">"#));
+        assert!(svg.contains("flowchart-link"));
+        assert!(svg.contains("flowchart-v2-pointEnd"));
+        assert!(svg.contains("text-inner-tspan"));
+        assert!(!svg.contains("foreignObject"));
+        assert!(svg.ends_with("</svg>"));
     }
 }

@@ -8,6 +8,18 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+/// mermaid CLI config passed via `-c`. `htmlLabels: false` makes mermaid emit
+/// SVG `<text>` labels instead of `foreignObject` HTML (which needs a browser
+/// to lay out and is impossible to reproduce in pure Rust). `useMaxWidth:
+/// false` makes the root `<svg>` carry numeric `width`/`height` instead of
+/// `100%`, which the structural comparator can diff numerically. Both choices
+/// are mirrored by carcimaid's renderer so the two outputs are comparable.
+const MERMAID_CONFIG: &str = r#"{
+  "htmlLabels": false,
+  "flowchart": { "htmlLabels": false, "useMaxWidth": false },
+  "securityLevel": "loose"
+}"#;
+
 /// Configuration for invoking the oracle.
 #[derive(Debug, Clone)]
 pub struct Oracle {
@@ -61,7 +73,9 @@ impl Oracle {
         fs::create_dir_all(workdir)?;
         let input = workdir.join("input.mmd");
         let output = workdir.join("output.svg");
+        let config = workdir.join("config.json");
         fs::write(&input, source)?;
+        fs::write(&config, MERMAID_CONFIG)?;
         // Remove any stale output so a silent failure can't masquerade as success.
         let _ = fs::remove_file(&output);
 
@@ -74,6 +88,7 @@ impl Oracle {
         // image's default USER (1001) triggers `setresgid: Invalid argument`.
         let out = Command::new(&self.runtime)
             .args(["run", "--rm", "--user", "0:0", "-v", &mount, &self.image])
+            .args(["-c", "/data/config.json"])
             .args(["-i", "/data/input.mmd", "-o", "/data/output.svg"])
             .output()?;
 

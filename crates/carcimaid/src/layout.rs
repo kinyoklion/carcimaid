@@ -50,7 +50,9 @@ pub struct PlacedEdge {
 }
 
 // --- Tunable placeholder layout constants (rough mermaid-like defaults). ---
-const NODE_HEIGHT: f64 = 36.0;
+// mermaid's single-line node box is 49px tall; matching it makes the rank-axis
+// coordinates line up with mermaid (margin 8 + height 49 + ranksep 50).
+const NODE_HEIGHT: f64 = 49.0;
 const CHAR_WIDTH: f64 = 9.0;
 const NODE_PADDING_X: f64 = 16.0;
 const RANK_SEP: f64 = 50.0;

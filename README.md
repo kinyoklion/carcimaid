@@ -70,10 +70,21 @@ docker pull docker.io/minlag/mermaid-cli:latest
 
 ## Status
 
-Early. Flowcharts are the first target. The parser handles directions, the
-common node shapes, edge chains, edge styles, and `|label|` edge labels; layout
-is a placeholder layered algorithm pending a dagre-compatible port; SVG output
-is being aligned to mermaid's actual DOM structure. Not production-ready.
+Early. Flowcharts are the first target.
+
+- **Parser**: directions, the common node shapes, edge chains, edge styles, and
+  `|label|` edge labels.
+- **Renderer**: emits mermaid's `htmlLabels:false` SVG DOM (root attrs, the 12
+  arrowhead markers, `g.root` groups, `node.default`, `flowchart-link` edges,
+  drop-shadow `defs`, `<text>/<tspan>` labels). The oracle is run with the same
+  `htmlLabels:false` config so the two are comparable. Structural tag-similarity
+  vs the mermaid CLI is ~1.0 and the rank-axis (vertical, for `TD`) coordinates
+  already match mermaid exactly.
+- **Layout**: placeholder layered algorithm. The remaining structural-diff gap
+  is numeric — node widths/x-centering (needs real text metrics) and edge curve
+  routing (needs dagre). That's the next milestone.
+
+Not production-ready.
 
 ## License
 

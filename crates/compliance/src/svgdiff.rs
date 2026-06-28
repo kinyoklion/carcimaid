@@ -132,7 +132,14 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             numeric_tolerance: 1.0,
-            ignore_attrs: vec!["id".into(), "class".into(), "style".into()],
+            // id/class/style are non-deterministic or cosmetic; data-points is a
+            // base64 blob duplicating the path geometry already checked via `d`.
+            ignore_attrs: vec![
+                "id".into(),
+                "class".into(),
+                "style".into(),
+                "data-points".into(),
+            ],
             max_differences: 50,
         }
     }
@@ -165,7 +172,9 @@ fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>
         return;
     }
     diff_attrs(r, c, path, opts, out);
-    if r.text != c.text {
+    // <style> holds CSS, not diagram structure; mermaid emits a large theme
+    // block we don't reproduce. Compare its presence/position but not its text.
+    if r.tag != "style" && r.text != c.text {
         out.push(Difference {
             path: path.to_string(),
             kind: DiffKind::TextMismatch {
