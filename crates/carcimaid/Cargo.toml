@@ -1,0 +1,16 @@
+[package]
+name = "carcimaid"
+description = "Pure-Rust renderer that turns mermaid diagrams into SVG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "carcimaid"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]

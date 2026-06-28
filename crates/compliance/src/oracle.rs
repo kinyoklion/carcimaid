@@ -1,0 +1,96 @@
+//! Runs the official mermaid CLI (`mmdc`) as the reference renderer.
+//!
+//! The mermaid CLI needs a headless browser, so the most reproducible way to
+//! run it on NixOS is via the official Docker image (`minlag/mermaid-cli`),
+//! which bundles Chromium. This module shells out to `docker run`.
+
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+/// Configuration for invoking the oracle.
+#[derive(Debug, Clone)]
+pub struct Oracle {
+    /// Container runtime binary (`docker` or `podman`).
+    pub runtime: String,
+    /// Fully-qualified image reference.
+    pub image: String,
+}
+
+impl Default for Oracle {
+    fn default() -> Self {
+        Oracle {
+            runtime: "docker".to_string(),
+            // Fully qualified so podman's short-name resolution does not fail.
+            image: "docker.io/minlag/mermaid-cli:latest".to_string(),
+        }
+    }
+}
+
+/// Errors from running the oracle.
+#[derive(Debug)]
+pub enum OracleError {
+    Io(std::io::Error),
+    /// `mmdc` exited non-zero. Carries combined stdout+stderr.
+    Render(String),
+}
+
+impl std::fmt::Display for OracleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OracleError::Io(e) => write!(f, "io error invoking oracle: {e}"),
+            OracleError::Render(m) => write!(f, "mermaid-cli failed: {m}"),
+        }
+    }
+}
+
+impl std::error::Error for OracleError {}
+
+impl From<std::io::Error> for OracleError {
+    fn from(e: std::io::Error) -> Self {
+        OracleError::Io(e)
+    }
+}
+
+impl Oracle {
+    /// Render `source` to an SVG string using the mermaid CLI.
+    ///
+    /// `workdir` is a writable directory that gets bind-mounted into the
+    /// container; the diagram and its output live there. Caller owns cleanup.
+    pub fn render(&self, source: &str, workdir: &Path) -> Result<String, OracleError> {
+        fs::create_dir_all(workdir)?;
+        let input = workdir.join("input.mmd");
+        let output = workdir.join("output.svg");
+        fs::write(&input, source)?;
+        // Remove any stale output so a silent failure can't masquerade as success.
+        let _ = fs::remove_file(&output);
+
+        // Bind mounts must be absolute paths, otherwise podman/docker treats
+        // the source as a (named) volume.
+        let abs = workdir.canonicalize()?;
+        let mount = format!("{}:/data", abs.display());
+        // `--user 0:0` makes the container run as container-root, which maps to
+        // the single available host UID under rootless podman. Without it the
+        // image's default USER (1001) triggers `setresgid: Invalid argument`.
+        let out = Command::new(&self.runtime)
+            .args(["run", "--rm", "--user", "0:0", "-v", &mount, &self.image])
+            .args(["-i", "/data/input.mmd", "-o", "/data/output.svg"])
+            .output()?;
+
+        if !out.status.success() || !output.exists() {
+            let mut msg = String::from_utf8_lossy(&out.stdout).into_owned();
+            msg.push_str(&String::from_utf8_lossy(&out.stderr));
+            return Err(OracleError::Render(msg));
+        }
+        Ok(fs::read_to_string(&output)?)
+    }
+
+    /// Check the runtime and image are usable by running `--version`.
+    pub fn is_available(&self) -> bool {
+        Command::new(&self.runtime)
+            .args(["image", "inspect", &self.image])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}

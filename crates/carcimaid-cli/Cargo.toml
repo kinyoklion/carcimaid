@@ -1,0 +1,16 @@
+[package]
+name = "carcimaid-cli"
+description = "Command-line front-end for the carcimaid mermaid-to-SVG renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "carcimaid"
+path = "src/main.rs"
+
+[dependencies]
+carcimaid.workspace = true
+clap = { version = "4", features = ["derive"] }

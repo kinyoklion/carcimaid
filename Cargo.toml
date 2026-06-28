@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/carcimaid",
+    "crates/carcimaid-cli",
+    "crates/compliance",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/kingdewman/carcimaid"
+authors = ["Ryan Lamb"]
+
+[workspace.dependencies]
+carcimaid = { path = "crates/carcimaid" }
