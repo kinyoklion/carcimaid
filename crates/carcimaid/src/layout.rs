@@ -1,15 +1,18 @@
 //! Geometry assignment. Consumes an [`ir::Diagram`] and produces a laid-out
 //! diagram with concrete coordinates ready for rendering.
 //!
-//! The current flowchart layout is a **placeholder**: a simple longest-path
-//! layered assignment (rank = longest path from a root, x = order within rank).
-//! It establishes the [`LaidOut`] data shape and a working end-to-end pipeline.
-//! It will be replaced by a dagre-compatible layered layout (rank → order →
-//! coordinate assignment) so that structural SVG comparison against the mermaid
-//! CLI becomes meaningful. See `ATTRIBUTION.md` for the dagre reference.
+//! Flowchart layout delegates to the [`dagre`] crate — a Rust port of the same
+//! dagre algorithm mermaid uses — driven with mermaid's parameters (nodesep /
+//! ranksep 50, margin 8, network-simplex ranking). With our DejaVu-based node
+//! sizes as input, this reproduces mermaid's node coordinates, edge waypoints,
+//! and overall dimensions. See `ATTRIBUTION.md` for the dagre/font references.
 
 use crate::ir::{Diagram, Direction, Flowchart, NodeShape};
 use crate::Result;
+
+use dagre::graph::{Graph, GraphOptions};
+use dagre::layout::types::{EdgeLabel, GraphLabel, LayoutOptions, NodeLabel, RankDir};
+use dagre::layout::layout as dagre_layout;
 
 /// A laid-out diagram: geometry plus enough of the model to render.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,22 +43,24 @@ pub struct PlacedNode {
     pub height: f64,
 }
 
-/// An edge routed as a polyline through `points` (center to center for now).
+/// An edge routed as a polyline through `points` (dagre's waypoints, from the
+/// source border through any bend points to the target border).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedEdge {
     pub from: usize,
     pub to: usize,
     pub label: Option<String>,
     pub points: Vec<(f64, f64)>,
+    /// Whether the edge has an arrowhead at the `to` end.
+    pub arrow: bool,
 }
 
-// --- Tunable placeholder layout constants (rough mermaid-like defaults). ---
-// mermaid's single-line node box is 49px tall; matching it makes the rank-axis
-// coordinates line up with mermaid (margin 8 + height 49 + ranksep 50).
+// --- mermaid layout parameters (its flowchart defaults). ---
 const NODE_HEIGHT: f64 = 49.0;
 const FONT_SIZE: f64 = 16.0;
+const NODE_SEP: f64 = 50.0;
 const RANK_SEP: f64 = 50.0;
-const NODE_SEP: f64 = 40.0;
+const EDGE_SEP: f64 = 20.0;
 const MARGIN: f64 = 8.0;
 
 /// Lay out a diagram.
@@ -80,114 +85,150 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
     (text_w + pad, NODE_HEIGHT)
 }
 
-fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
-    let n = chart.nodes.len();
-    let ranks = longest_path_ranks(chart);
-    let max_rank = ranks.iter().copied().max().unwrap_or(0);
+fn rank_dir(dir: Direction) -> RankDir {
+    match dir {
+        Direction::TopBottom => RankDir::TB,
+        Direction::BottomTop => RankDir::BT,
+        Direction::LeftRight => RankDir::LR,
+        Direction::RightLeft => RankDir::RL,
+    }
+}
 
-    // Group node indices by rank, preserving input order within a rank.
-    let mut by_rank: Vec<Vec<usize>> = vec![Vec::new(); max_rank + 1];
-    for (idx, &r) in ranks.iter().enumerate() {
-        by_rank[r].push(idx);
+fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
+    // Our node sizes (used both as dagre input and as the rendered box sizes).
+    let sizes: Vec<(f64, f64)> = chart
+        .nodes
+        .iter()
+        .map(|n| node_size(&n.label, n.shape))
+        .collect();
+
+    if chart.nodes.is_empty() {
+        return LaidOutFlowchart {
+            direction: chart.direction,
+            width: MARGIN * 2.0,
+            height: MARGIN * 2.0,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        };
     }
 
-    let horizontal = matches!(chart.direction, Direction::LeftRight | Direction::RightLeft);
+    let mut g: Graph<NodeLabel, EdgeLabel> = Graph::with_options(GraphOptions {
+        directed: true,
+        multigraph: true,
+        compound: true,
+    });
 
-    let mut placed: Vec<PlacedNode> = Vec::with_capacity(n);
-    placed.resize(
-        n,
-        PlacedNode {
-            id: String::new(),
-            label: String::new(),
-            shape: NodeShape::Rectangle,
-            cx: 0.0,
-            cy: 0.0,
-            width: 0.0,
-            height: 0.0,
-        },
+    for (i, &(w, h)) in sizes.iter().enumerate() {
+        g.set_node(
+            i.to_string(),
+            Some(NodeLabel { width: w, height: h, ..Default::default() }),
+        );
+    }
+    for (i, e) in chart.edges.iter().enumerate() {
+        // Reserve space for an edge label so dagre routes around it, matching
+        // mermaid. Unlabelled edges contribute no label box.
+        let (lw, lh) = match &e.label {
+            Some(l) => (crate::text::measure_width(l, FONT_SIZE), crate::text::line_height(FONT_SIZE)),
+            None => (0.0, 0.0),
+        };
+        g.set_edge(
+            e.from.to_string(),
+            e.to.to_string(),
+            Some(EdgeLabel { width: lw, height: lh, ..Default::default() }),
+            Some(i.to_string().as_str()),
+        );
+    }
+
+    dagre_layout(
+        &mut g,
+        Some(LayoutOptions {
+            rankdir: rank_dir(chart.direction),
+            nodesep: NODE_SEP,
+            ranksep: RANK_SEP,
+            edgesep: EDGE_SEP,
+            marginx: MARGIN,
+            marginy: MARGIN,
+            ..Default::default()
+        }),
     );
 
-    let mut diagram_w: f64 = 0.0;
-    let mut diagram_h: f64 = 0.0;
-
-    // Place rank by rank. "Along" is the within-rank axis; "depth" is the
-    // rank axis. We map those to x/y based on direction.
-    let mut depth_cursor = MARGIN;
-    for (r, members) in by_rank.iter().enumerate() {
-        let _ = r;
-        let mut along_cursor = MARGIN;
-        let mut rank_thickness: f64 = 0.0;
-        for &idx in members {
-            let node = &chart.nodes[idx];
-            let (w, h) = node_size(&node.label, node.shape);
-            let (depth_extent, along_extent) = if horizontal { (w, h) } else { (h, w) };
-            rank_thickness = rank_thickness.max(depth_extent);
-
-            let along_center = along_cursor + along_extent / 2.0;
-            let depth_center = depth_cursor + depth_extent / 2.0;
-            let (cx, cy) = if horizontal {
-                (depth_center, along_center)
-            } else {
-                (along_center, depth_center)
-            };
-
-            placed[idx] = PlacedNode {
+    let nodes: Vec<PlacedNode> = chart
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| {
+            let placed = g.node(&i.to_string());
+            let (w, h) = sizes[i];
+            PlacedNode {
                 id: node.id.clone(),
                 label: node.label.clone(),
                 shape: node.shape,
-                cx,
-                cy,
+                cx: placed.and_then(|n| n.x).unwrap_or(0.0),
+                cy: placed.and_then(|n| n.y).unwrap_or(0.0),
                 width: w,
                 height: h,
-            };
-            along_cursor += along_extent + NODE_SEP;
-            diagram_w = diagram_w.max(cx + w / 2.0 + MARGIN);
-            diagram_h = diagram_h.max(cy + h / 2.0 + MARGIN);
-        }
-        depth_cursor += rank_thickness + RANK_SEP;
-    }
-
-    let edges = chart
-        .edges
-        .iter()
-        .map(|e| {
-            let a = &placed[e.from];
-            let b = &placed[e.to];
-            PlacedEdge {
-                from: e.from,
-                to: e.to,
-                label: e.label.clone(),
-                points: vec![(a.cx, a.cy), (b.cx, b.cy)],
             }
         })
         .collect();
 
+    let edges: Vec<PlacedEdge> = chart
+        .edges
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let points = g
+                .edge(&e.from.to_string(), &e.to.to_string(), Some(&i.to_string()))
+                .map(|el| el.points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| vec![(nodes[e.from].cx, nodes[e.from].cy), (nodes[e.to].cx, nodes[e.to].cy)]);
+            PlacedEdge {
+                from: e.from,
+                to: e.to,
+                label: e.label.clone(),
+                points,
+                arrow: e.arrow,
+            }
+        })
+        .collect();
+
+    let (width, height) = g
+        .graph_label::<GraphLabel>()
+        .map(|gl| (gl.width, gl.height))
+        .unwrap_or((MARGIN * 2.0, MARGIN * 2.0));
+
     LaidOutFlowchart {
         direction: chart.direction,
-        width: diagram_w.max(MARGIN * 2.0),
-        height: diagram_h.max(MARGIN * 2.0),
-        nodes: placed,
+        width,
+        height,
+        nodes,
         edges,
     }
 }
 
-/// Longest-path layering: each node's rank is the longest chain of edges
-/// leading into it. Cycles are broken implicitly by the bounded iteration.
-fn longest_path_ranks(chart: &Flowchart) -> Vec<usize> {
-    let n = chart.nodes.len();
-    let mut rank = vec![0usize; n];
-    // Relax edges up to n times (sufficient for a DAG; bounded for cycles).
-    for _ in 0..n {
-        let mut changed = false;
-        for e in &chart.edges {
-            if rank[e.to] < rank[e.from] + 1 {
-                rank[e.to] = rank[e.from] + 1;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser;
+
+    fn flowchart(src: &str) -> LaidOutFlowchart {
+        match layout(&parser::parse(src).unwrap()).unwrap() {
+            LaidOut::Flowchart(f) => f,
         }
     }
-    rank
+
+    #[test]
+    fn simple_chain_matches_mermaid_coordinates() {
+        // mermaid renders `A[Start] --> B[Middle] --> C[End]` with all three
+        // nodes centred on x=64.43 at y=32.5/131.5/230.5, viewBox 128.86x263.
+        let f = flowchart("flowchart TD\n A[Start] --> B[Middle] --> C[End]");
+        assert_eq!(f.nodes.len(), 3);
+        let approx = |a: f64, b: f64| (a - b).abs() < 0.5;
+        for n in &f.nodes {
+            assert!(approx(n.cx, 64.43), "cx={} expected ~64.43", n.cx);
+        }
+        assert!(approx(f.nodes[0].cy, 32.5), "{}", f.nodes[0].cy);
+        assert!(approx(f.nodes[1].cy, 131.5), "{}", f.nodes[1].cy);
+        assert!(approx(f.nodes[2].cy, 230.5), "{}", f.nodes[2].cy);
+        assert!(approx(f.width, 128.86) && approx(f.height, 263.0), "{}x{}", f.width, f.height);
+    }
 }

@@ -186,20 +186,50 @@ fn edge_id(edge: &PlacedEdge, nodes: &[PlacedNode]) -> String {
     escape(&format!("L_{}_{}_0", nodes[edge.from].id, nodes[edge.to].id))
 }
 
+/// Arrow inset: mermaid shortens the path at the arrow end by this many px so
+/// the arrowhead marker sits flush against the target node border.
+const ARROW_INSET: f64 = 4.0;
+
 fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
-    let d = path_d(&edge.points);
+    let mut points = edge.points.clone();
+    if edge.arrow {
+        clip_end(&mut points, ARROW_INSET);
+    }
+    let d = curve_basis(&points);
+    let marker = if edge.arrow {
+        format!(r#" marker-end="url(#{ID}_flowchart-v2-pointEnd)""#)
+    } else {
+        String::new()
+    };
     let _ = write!(
         s,
         concat!(
             r#"<path id="{id}-{eid}" "#,
             r#"class="edge-thickness-normal edge-pattern-solid flowchart-link" "#,
-            r#"d="{d}" data-edge="true" data-et="edge" data-id="{eid}" data-look="classic" "#,
-            r#"marker-end="url(#{id}_flowchart-v2-pointEnd)"/>"#,
+            r#"d="{d}" data-edge="true" data-et="edge" data-id="{eid}" data-look="classic"{marker}/>"#,
         ),
         id = ID,
         eid = edge_id(edge, nodes),
         d = d,
+        marker = marker,
     );
+}
+
+/// Move the last waypoint toward the previous one by `inset` px, so the
+/// arrowhead fits — matching mermaid's path shortening at the arrow end.
+fn clip_end(points: &mut [(f64, f64)], inset: f64) {
+    let n = points.len();
+    if n < 2 {
+        return;
+    }
+    let (x1, y1) = points[n - 1];
+    let (x0, y0) = points[n - 2];
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len > inset {
+        let t = (len - inset) / len;
+        points[n - 1] = (x0 + dx * t, y0 + dy * t);
+    }
 }
 
 /// Emit the edge label. mermaid's structure differs for labelled vs unlabelled
@@ -253,16 +283,81 @@ fn render_text(s: &mut String, label: Option<&str>, anchor: bool) {
     s.push_str("</tspan></text>");
 }
 
-fn path_d(points: &[(f64, f64)]) -> String {
-    let mut d = String::new();
-    for (i, (x, y)) in points.iter().enumerate() {
-        let cmd = if i == 0 { 'M' } else { 'L' };
-        let _ = write!(d, "{cmd}{},{}", round(*x), round(*y));
+/// Render a path through `points` as a B-spline, matching d3's `curveBasis`
+/// (mermaid's default flowchart edge curve). Reproduces d3's open-basis curve
+/// lifecycle exactly so the emitted `M…L…C…C…L…` matches mermaid's `d`.
+fn curve_basis(points: &[(f64, f64)]) -> String {
+    let n = points.len();
+    if n == 0 {
+        return String::new();
     }
+    if n == 1 {
+        return format!("M{},{}", num(points[0].0), num(points[0].1));
+    }
+    if n == 2 {
+        return format!(
+            "M{},{}L{},{}",
+            num(points[0].0),
+            num(points[0].1),
+            num(points[1].0),
+            num(points[1].1)
+        );
+    }
+
+    let mut d = String::new();
+    let (mut x0, mut y0) = (f64::NAN, f64::NAN);
+    let (mut x1, mut y1) = (f64::NAN, f64::NAN);
+    let bezier = |d: &mut String, x0: f64, y0: f64, x1: f64, y1: f64, x: f64, y: f64| {
+        let _ = write!(
+            d,
+            "C{},{},{},{},{},{}",
+            num((2.0 * x0 + x1) / 3.0),
+            num((2.0 * y0 + y1) / 3.0),
+            num((x0 + 2.0 * x1) / 3.0),
+            num((y0 + 2.0 * y1) / 3.0),
+            num((x0 + 4.0 * x1 + x) / 6.0),
+            num((y0 + 4.0 * y1 + y) / 6.0),
+        );
+    };
+
+    for (i, &(x, y)) in points.iter().enumerate() {
+        match i {
+            0 => {
+                let _ = write!(d, "M{},{}", num(x), num(y));
+            }
+            1 => {}
+            2 => {
+                let _ = write!(d, "L{},{}", num((5.0 * x0 + x1) / 6.0), num((5.0 * y0 + y1) / 6.0));
+                bezier(&mut d, x0, y0, x1, y1, x, y);
+            }
+            _ => bezier(&mut d, x0, y0, x1, y1, x, y),
+        }
+        x0 = x1;
+        x1 = x;
+        y0 = y1;
+        y1 = y;
+    }
+    // Curve end: emit the final bezier and line segment (d3 basis lineEnd).
+    bezier(&mut d, x0, y0, x1, y1, x1, y1);
+    let _ = write!(d, "L{},{}", num(x1), num(y1));
     d
 }
 
-/// Round to a stable precision so output is deterministic and diff-friendly.
+/// Format a coordinate like d3-path/mermaid: round to 3 decimals, trim trailing
+/// zeros and a trailing dot.
+fn num(v: f64) -> String {
+    let r = (v * 1000.0).round() / 1000.0;
+    let mut s = format!("{r:.3}");
+    if s.contains('.') {
+        s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+    }
+    if s == "-0" {
+        s = "0".to_string();
+    }
+    s
+}
+
+/// Round to a stable precision so node/shape output is deterministic.
 fn round(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
 }
