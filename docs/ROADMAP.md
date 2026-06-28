@@ -6,41 +6,43 @@ Run it yourself with `cargo run -p compliance -- --corpus corpus/flowchart/merma
 
 ## Baseline snapshot (flowchart corpus)
 
-After text measurement (commit f112648):
+After text measurement + dagre layout (commit b6f2c39):
 
 - 199 diagrams, 196 compared (3 are unrenderable by the mermaid CLI itself).
-- Structural tag-similarity: median **0.98**, 80% ≥ 0.95.
-- Exact passes: **1** (`graph TD; A[Christmas]` — first single-node match).
-- Per-case diffs: median **24**; cases within 10 diffs: **37/196** (was 24).
+- **Exact passes: 5** (e.g. `simple-chain` — node coords, edge curves, viewBox
+  all byte-for-byte). Geometry is now correct.
+- Per-case diffs: median **24** (little aggregate change — see below).
 
-Diff composition now (occurrences across all cases):
+**Key finding:** node coordinates, edge `curveBasis` routing, and viewBox now
+match mermaid *exactly* wherever the element trees line up (that's the 5 passes).
+But the structural diff is recursive and order-sensitive: as soon as a diagram
+contains a feature we don't model yet (a subgraph, a multi-line label, an exotic
+shape), child counts diverge and **everything downstream is compared against the
+wrong mermaid element**. So the `transform`/`d` counts stay high not because the
+coordinates are wrong but because they're misaligned. The bottleneck has moved
+from geometry to **structural coverage**.
 
-| rank | diff | cause | fix |
-|------|------|-------|-----|
-| 1 | `transform` (992) | node/edge-label positions | **dagre layout** |
-| 2 | `d` (862) | edge bezier routing | **dagre layout** |
-| 3 | `width`/`height`/`x`/`y` (~1660) | multi-line & wrapped labels, non-rect shapes | label wrapping; per-shape sizing |
-| 4 | `ChildCountMismatch` (692) | subgraphs, multi-line/markdown labels | clusters; label rows |
-| 5 | `TextMismatch` (402) | markdown/`<br>`/KaTeX labels kept literal | label processing |
-| 6 | `TagMismatch` (279) | unsupported shapes, `<a>` links | more shapes; link wrapping |
+Unsupported structural features, by corpus frequency:
 
-Single-line plain-rect node sizing now matches mermaid (e.g. simple-chain went
-13 → 4 diffs, viewBox matches); the remaining geometry gap is positional.
+| feature | % of corpus | effect |
+|---------|-------------|--------|
+| subgraphs (`subgraph … end`) | 31% | unrendered `g.clusters`; large cascades |
+| exotic shapes (hexagon, cylinder, trapezoid, …) | 24% | `polygon`/`path` vs our `rect` |
+| `<br>` / multi-line labels | 18% | extra `tspan` rows; size + child-count diffs |
+| `click`/links | 13% | mermaid wraps the node in `<a>` |
 
 ## Next milestones, in impact order
 
-1. **Text measurement** — DONE (commit f112648). Measures with DejaVu Sans (the
-   font mermaid's headless Chromium resolves to) via `ttf-parser`; node width =
-   text width + shape padding. Fixed single-line rect sizing + first exact pass.
-2. **Dagre layout** — port/vendor a dagre-compatible layered layout (rank →
-   order → coordinate assignment) plus edge bezier routing, so `transform`/`d`
-   match for multi-node graphs. See `ATTRIBUTION.md`.
-3. **Node shape coverage** — extend beyond the current 5 shapes to mermaid's
-   full set (hexagon, trapezoids, cylinder, subroutine, etc.), matching the
-   `polygon`/`path` elements mermaid emits.
-4. **Subgraphs / clusters** — parse `subgraph … end` and render the `g.clusters`
-   group; resolves a large share of `ChildCountMismatch`.
-5. **Rich labels** — markdown (`**bold**`), `<br>` line breaks, and multi-row
-   text (mermaid emits one `tspan` row per line).
-6. **Polish** — `<a>` wrapping for `click`/`href` nodes, `<title>`/`<desc>`
-   accessibility nodes.
+1. **Text measurement** — DONE (f112648). DejaVu Sans via `ttf-parser`.
+2. **Dagre layout + curveBasis edges** — DONE (b6f2c39). Drives the `dagre`
+   crate with mermaid's params; edges via a d3-curveBasis reimplementation with
+   4px arrow clipping. First exact passes.
+3. **Subgraphs / clusters** — parse `subgraph … end`, model as dagre compound
+   nodes, render the `g.clusters` group. Highest-frequency unsupported feature
+   (31%); unblocks the biggest `ChildCountMismatch` cascades.
+4. **Node shape coverage** — mermaid's full shape set (hexagon, trapezoids,
+   cylinder, subroutine, …) as the `polygon`/`path` elements mermaid emits, with
+   per-shape padding.
+5. **Rich labels** — `<br>` line breaks and multi-row text (one `tspan` row per
+   line), then markdown (`**bold**`).
+6. **Polish** — `<a>` wrapping for `click`/`href` nodes, `<title>`/`<desc>`.
