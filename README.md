@@ -72,8 +72,11 @@ docker pull docker.io/minlag/mermaid-cli:latest
 
 Early. Flowcharts are the first target.
 
-- **Parser**: directions, the common node shapes, edge chains, edge styles, and
-  `|label|` edge labels.
+- **Corpus**: 199 flowchart diagrams harvested from mermaid's own cypress specs
+  and demos (`corpus/flowchart/mermaid/`, MIT, provenance in `SOURCES.tsv`).
+- **Parser**: directions, the common node shapes, edge chains, edge styles,
+  `|label|` edge labels, `A & B` node groups, YAML frontmatter, and multibyte
+  text. All 199 corpus diagrams parse and render to well-formed SVG.
 - **Renderer**: emits mermaid's `htmlLabels:false` SVG DOM (root attrs, the 12
   arrowhead markers, `g.root` groups, `node.default`, `flowchart-link` edges,
   drop-shadow `defs`, `<text>/<tspan>` labels). The oracle is run with the same
