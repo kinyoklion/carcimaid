@@ -115,7 +115,6 @@ flowchart-icon_001.mmd	cypress/integration/rendering/flowchart/flowchart-icon.sp
 flowchart-icon_002.mmd	cypress/integration/rendering/flowchart/flowchart-icon.spec.js	2
 flowchart-icon_003.mmd	cypress/integration/rendering/flowchart/flowchart-icon.spec.js	3
 flowchart-icon_004.mmd	cypress/integration/rendering/flowchart/flowchart-icon.spec.js	4
-flowchart-shape-alias_000.mmd	cypress/integration/rendering/flowchart/flowchart-shape-alias.spec.ts	0
 flowchart-v2_001.mmd	cypress/integration/rendering/flowchart/flowchart-v2.spec.js	1
 flowchart-v2_002.mmd	cypress/integration/rendering/flowchart/flowchart-v2.spec.js	2
 flowchart-v2_003.mmd	cypress/integration/rendering/flowchart/flowchart-v2.spec.js	3

@@ -52,28 +52,70 @@ fn parse_direction(token: &str) -> Option<Direction> {
 }
 
 /// Parse a single statement: either a bare node definition or an edge chain.
+///
+/// Each endpoint may be an `&`-separated group (`A & B --> C & D`), which
+/// expands to the cross-product of edges between adjacent groups.
 fn parse_statement(stmt: &str, chart: &mut Flowchart) {
     let (endpoints, ops) = split_chain(stmt);
+    let groups: Vec<Vec<usize>> = endpoints
+        .iter()
+        .map(|ep| split_group(ep).iter().map(|n| ensure_node(chart, n)).collect())
+        .collect();
 
     if ops.is_empty() {
-        // Bare node definition, e.g. `A[Start]`.
-        if let Some(ep) = endpoints.first() {
-            ensure_node(chart, ep);
-        }
+        // Bare node definition(s), e.g. `A[Start]` or `A & B`.
         return;
     }
 
     for (i, op) in ops.iter().enumerate() {
-        let from = ensure_node(chart, &endpoints[i]);
-        let to = ensure_node(chart, &endpoints[i + 1]);
-        chart.edges.push(Edge {
-            from,
-            to,
-            label: op.label.clone(),
-            style: op.style,
-            arrow: op.arrow,
-        });
+        for &from in &groups[i] {
+            for &to in &groups[i + 1] {
+                chart.edges.push(Edge {
+                    from,
+                    to,
+                    label: op.label.clone(),
+                    style: op.style,
+                    arrow: op.arrow,
+                });
+            }
+        }
     }
+}
+
+/// Split an endpoint into `&`-separated node tokens, respecting bracket/quote
+/// nesting so an `&` inside a label is not treated as a separator.
+fn split_group(endpoint: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    for c in endpoint.chars() {
+        match c {
+            '"' => {
+                in_quote = !in_quote;
+                cur.push(c);
+            }
+            '[' | '(' | '{' if !in_quote => {
+                depth += 1;
+                cur.push(c);
+            }
+            ']' | ')' | '}' if !in_quote => {
+                depth -= 1;
+                cur.push(c);
+            }
+            '&' if depth == 0 && !in_quote => {
+                if !cur.trim().is_empty() {
+                    parts.push(cur.trim().to_string());
+                }
+                cur.clear();
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    parts
 }
 
 /// A parsed edge operator with its optional `|label|`.
@@ -258,6 +300,16 @@ mod tests {
         let chart = parse("graph TD\n A -.-> B\n B ==> C").unwrap();
         assert_eq!(chart.edges[0].style, EdgeStyle::Dotted);
         assert_eq!(chart.edges[1].style, EdgeStyle::Thick);
+    }
+
+    #[test]
+    fn expands_ampersand_node_groups() {
+        // `A & B --> C & D` is the cross-product of edges.
+        let chart = parse("flowchart TD\n A & B --> C & D").unwrap();
+        assert_eq!(chart.nodes.len(), 4);
+        assert_eq!(chart.edges.len(), 4); // A-C, A-D, B-C, B-D
+        let ids: Vec<_> = chart.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["A", "B", "C", "D"]);
     }
 
     #[test]

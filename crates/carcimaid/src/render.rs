@@ -181,8 +181,9 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
 }
 
 /// `L_<fromId>_<toId>_0`, mermaid's stable edge id (uses node ids, not indices).
+/// Escaped so it is always a valid XML attribute value.
 fn edge_id(edge: &PlacedEdge, nodes: &[PlacedNode]) -> String {
-    format!("L_{}_{}_0", nodes[edge.from].id, nodes[edge.to].id)
+    escape(&format!("L_{}_{}_0", nodes[edge.from].id, nodes[edge.to].id))
 }
 
 fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {

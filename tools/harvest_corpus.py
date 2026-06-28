@@ -19,8 +19,8 @@ from pathlib import Path
 
 
 def is_flowchart(text: str) -> bool:
-    """First significant line (after optional YAML frontmatter / %% directives)
-    starts with `flowchart` or `graph`."""
+    """A flowchart/graph diagram with at least one statement after the header
+    (skips degenerate fixtures like a bare `flowchart`)."""
     lines = text.splitlines()
     i = 0
     if i < len(lines) and lines[i].strip() == "---":
@@ -28,12 +28,15 @@ def is_flowchart(text: str) -> bool:
         while i < len(lines) and lines[i].strip() != "---":
             i += 1
         i += 1
-    for line in lines[i:]:
-        s = line.strip()
-        if not s or s.startswith("%%"):
-            continue
-        return (s.split()[0] if s.split() else "") in ("flowchart", "graph")
-    return False
+    body = [l.strip() for l in lines[i:] if l.strip() and not l.strip().startswith("%%")]
+    if not body:
+        return False
+    head = body[0].split()
+    if (head[0] if head else "") not in ("flowchart", "graph"):
+        return False
+    # Require a real body: either more lines, or a header line that also carries
+    # statements (e.g. `graph TD; A-->B`).
+    return len(body) > 1 or len(head) > 2 or ";" in body[0]
 
 
 def extract_backticks(src: str):
