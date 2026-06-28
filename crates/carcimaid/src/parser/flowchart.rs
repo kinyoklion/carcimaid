@@ -88,39 +88,41 @@ struct EdgeOp {
 /// ignored. Returns (endpoint_strings, operators) where
 /// `endpoint_strings.len() == operators.len() + 1` for a well-formed chain.
 fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
-    let bytes = stmt.as_bytes();
     let mut endpoints = Vec::new();
     let mut ops = Vec::new();
     let mut cur = String::new();
     let mut depth = 0i32;
     let mut in_quote = false;
 
+    // `i` is always a byte offset on a char boundary: we only ever advance by
+    // a whole char's UTF-8 length or by an (ASCII) operator's byte length.
     let mut i = 0;
-    while i < bytes.len() {
-        let c = bytes[i] as char;
+    while i < stmt.len() {
+        let c = stmt[i..].chars().next().unwrap();
+        let clen = c.len_utf8();
         if in_quote {
             cur.push(c);
             if c == '"' {
                 in_quote = false;
             }
-            i += 1;
+            i += clen;
             continue;
         }
         match c {
             '"' => {
                 in_quote = true;
                 cur.push(c);
-                i += 1;
+                i += clen;
             }
             '[' | '(' | '{' => {
                 depth += 1;
                 cur.push(c);
-                i += 1;
+                i += clen;
             }
             ']' | ')' | '}' => {
                 depth -= 1;
                 cur.push(c);
-                i += 1;
+                i += clen;
             }
             _ if depth == 0 => {
                 if let Some((len, style, arrow)) = detect_op(&stmt[i..]) {
@@ -144,12 +146,12 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                     ops.push(EdgeOp { style, arrow, label });
                 } else {
                     cur.push(c);
-                    i += 1;
+                    i += clen;
                 }
             }
             _ => {
                 cur.push(c);
-                i += 1;
+                i += clen;
             }
         }
     }
@@ -256,6 +258,16 @@ mod tests {
         let chart = parse("graph TD\n A -.-> B\n B ==> C").unwrap();
         assert_eq!(chart.edges[0].style, EdgeStyle::Dotted);
         assert_eq!(chart.edges[1].style, EdgeStyle::Thick);
+    }
+
+    #[test]
+    fn handles_multibyte_utf8_labels() {
+        // Regression: byte-indexed scanning used to panic on non-ASCII labels.
+        let chart = parse("flowchart TD\n a[\"提交\"] --> b[\"完成\"]").unwrap();
+        assert_eq!(chart.nodes.len(), 2);
+        assert_eq!(chart.nodes[0].label, "提交");
+        assert_eq!(chart.nodes[1].label, "完成");
+        assert_eq!(chart.edges.len(), 1);
     }
 
     #[test]
