@@ -37,6 +37,17 @@ so. carcimaid itself is MIT-licensed (see `LICENSE`).
 - `rust-sugiyama` (paddison) — MIT — fallback Sugiyama layout core.
 - `layout-rs` (nadavrot/layout) — MIT — referenced for SVG emission patterns.
 
+### DejaVu Sans — Bitstream Vera / public-domain (permissive)
+- Upstream: <https://dejavu-fonts.github.io/>
+- License: Bitstream Vera Fonts Copyright (permissive); DejaVu changes are
+  public domain. Full text vendored at
+  `crates/carcimaid/resources/DejaVuSans-LICENSE.txt`.
+- Why we ship it: the mermaid CLI's headless Chromium resolves mermaid's default
+  font stack (`"trebuchet ms", verdana, arial, sans-serif`) to **DejaVu Sans**.
+  carcimaid measures label text with the very same font file
+  (`crates/carcimaid/resources/DejaVuSans.ttf`) so node/label sizes match
+  mermaid's. See `crates/carcimaid/src/text.rs`.
+
 ### warpdotdev/mermaid-to-svg — MIT
 - Repository: <https://github.com/warpdotdev/mermaid-to-svg>
 - An existing pure-Rust mermaid→SVG implementation studied as an end-to-end

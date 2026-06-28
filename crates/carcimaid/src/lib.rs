@@ -24,6 +24,7 @@ pub mod ir;
 pub mod layout;
 pub mod parser;
 pub mod render;
+pub mod text;
 
 pub use error::{Error, Result};
 

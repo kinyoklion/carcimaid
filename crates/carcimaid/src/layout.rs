@@ -53,8 +53,7 @@ pub struct PlacedEdge {
 // mermaid's single-line node box is 49px tall; matching it makes the rank-axis
 // coordinates line up with mermaid (margin 8 + height 49 + ranksep 50).
 const NODE_HEIGHT: f64 = 49.0;
-const CHAR_WIDTH: f64 = 9.0;
-const NODE_PADDING_X: f64 = 16.0;
+const FONT_SIZE: f64 = 16.0;
 const RANK_SEP: f64 = 50.0;
 const NODE_SEP: f64 = 40.0;
 const MARGIN: f64 = 8.0;
@@ -66,9 +65,19 @@ pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
     }
 }
 
-fn node_size(label: &str) -> (f64, f64) {
-    let w = (label.chars().count() as f64 * CHAR_WIDTH) + 2.0 * NODE_PADDING_X;
-    (w.max(40.0), NODE_HEIGHT)
+/// Node box size from the label's measured text width plus shape-dependent
+/// padding, derived empirically from mermaid's output (plain rect +60, rounded
+/// +30). Other shapes are approximated pending dedicated shape sizing.
+fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
+    let text_w = crate::text::measure_width(label, FONT_SIZE);
+    let pad = match shape {
+        NodeShape::Rectangle => 60.0,
+        NodeShape::RoundedRectangle => 30.0,
+        // TODO: stadium/circle/rhombus have their own (larger) padding; refine
+        // when implementing full per-shape geometry.
+        NodeShape::Stadium | NodeShape::Circle | NodeShape::Rhombus => 60.0,
+    };
+    (text_w + pad, NODE_HEIGHT)
 }
 
 fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
@@ -110,7 +119,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         let mut rank_thickness: f64 = 0.0;
         for &idx in members {
             let node = &chart.nodes[idx];
-            let (w, h) = node_size(&node.label);
+            let (w, h) = node_size(&node.label, node.shape);
             let (depth_extent, along_extent) = if horizontal { (w, h) } else { (h, w) };
             rank_thickness = rank_thickness.max(depth_extent);
 

@@ -12,5 +12,6 @@ name = "carcimaid"
 path = "src/lib.rs"
 
 [dependencies]
+ttf-parser = "0.25"
 
 [dev-dependencies]
