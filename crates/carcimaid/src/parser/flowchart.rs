@@ -10,7 +10,7 @@
 //! inline-label form. These are recognised loosely and skipped rather than
 //! erroring, so partially-supported diagrams still produce output.
 
-use crate::ir::{Direction, Edge, EdgeStyle, Flowchart, Node, NodeShape};
+use crate::ir::{Direction, Edge, EdgeStyle, Flowchart, Node, NodeShape, Subgraph};
 use crate::Result;
 
 /// Parse a flowchart from full source (including its header line).
@@ -26,19 +26,69 @@ pub fn parse(source: &str) -> Result<Flowchart> {
         }
     }
 
+    // Stack of enclosing subgraph indices (for nesting). The top is the current
+    // subgraph that newly-defined nodes are assigned to.
+    let mut stack: Vec<usize> = Vec::new();
+
     for line in lines {
         if line.starts_with("%%") {
             continue;
         }
         for stmt in line.split(';') {
             let stmt = stmt.trim();
-            if !stmt.is_empty() {
-                parse_statement(stmt, &mut chart);
+            if stmt.is_empty() {
+                continue;
+            }
+            if let Some(rest) = subgraph_header(stmt) {
+                let parent = stack.last().copied();
+                let (id, title) = parse_subgraph_header(rest, chart.subgraphs.len());
+                chart.subgraphs.push(Subgraph { id, title, parent });
+                stack.push(chart.subgraphs.len() - 1);
+            } else if stmt == "end" {
+                stack.pop();
+            } else if is_direction_stmt(stmt) {
+                // `direction XX` inside a subgraph — per-subgraph direction is
+                // not yet modelled; skip so it isn't parsed as a node.
+            } else {
+                parse_statement(stmt, &mut chart, stack.last().copied());
             }
         }
     }
 
     Ok(chart)
+}
+
+/// If `stmt` opens a subgraph, return the text after the `subgraph` keyword.
+fn subgraph_header(stmt: &str) -> Option<&str> {
+    let rest = stmt.strip_prefix("subgraph")?;
+    // Must be followed by whitespace or end (avoid matching an id like `subgraphX`).
+    if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+        Some(rest.trim())
+    } else {
+        None
+    }
+}
+
+fn is_direction_stmt(stmt: &str) -> bool {
+    stmt.strip_prefix("direction")
+        .is_some_and(|r| r.trim_start() != r || r.is_empty())
+}
+
+/// Parse a subgraph header body into (id, title). Forms: `` (anonymous),
+/// `Title`, `id[Title]`, `"Title"`. Anonymous subgraphs get a synthetic id.
+fn parse_subgraph_header(body: &str, index: usize) -> (String, String) {
+    let body = body.trim();
+    if body.is_empty() {
+        return (format!("subGraph{index}"), String::new());
+    }
+    if let Some(open) = body.find('[') {
+        if let Some(inner) = body[open..].strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+            let id = body[..open].trim().to_string();
+            return (id, unquote(inner).to_string());
+        }
+    }
+    let t = unquote(body).to_string();
+    (t.clone(), t)
 }
 
 fn parse_direction(token: &str) -> Option<Direction> {
@@ -55,11 +105,11 @@ fn parse_direction(token: &str) -> Option<Direction> {
 ///
 /// Each endpoint may be an `&`-separated group (`A & B --> C & D`), which
 /// expands to the cross-product of edges between adjacent groups.
-fn parse_statement(stmt: &str, chart: &mut Flowchart) {
+fn parse_statement(stmt: &str, chart: &mut Flowchart, current: Option<usize>) {
     let (endpoints, ops) = split_chain(stmt);
     let groups: Vec<Vec<usize>> = endpoints
         .iter()
-        .map(|ep| split_group(ep).iter().map(|n| ensure_node(chart, n)).collect())
+        .map(|ep| split_group(ep).iter().map(|n| ensure_node(chart, n, current)).collect())
         .collect();
 
     if ops.is_empty() {
@@ -219,7 +269,8 @@ fn detect_op(s: &str) -> Option<(usize, EdgeStyle, bool)> {
 
 /// Ensure a node parsed from `endpoint` exists in the chart, returning its
 /// index. If the endpoint carries a shape/label, it updates the existing node.
-fn ensure_node(chart: &mut Flowchart, endpoint: &str) -> usize {
+/// A newly-created node is assigned to `current` (the enclosing subgraph).
+fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) -> usize {
     let (id, shape, label) = parse_endpoint(endpoint);
     if let Some(idx) = chart.node_index(&id) {
         if let Some(label) = label {
@@ -229,7 +280,7 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str) -> usize {
         return idx;
     }
     let label = label.unwrap_or_else(|| id.clone());
-    chart.nodes.push(Node { id, label, shape });
+    chart.nodes.push(Node { id, label, shape, subgraph: current });
     chart.nodes.len() - 1
 }
 
@@ -300,6 +351,25 @@ mod tests {
         let chart = parse("graph TD\n A -.-> B\n B ==> C").unwrap();
         assert_eq!(chart.edges[0].style, EdgeStyle::Dotted);
         assert_eq!(chart.edges[1].style, EdgeStyle::Thick);
+    }
+
+    #[test]
+    fn parses_subgraph_membership() {
+        let chart = parse("flowchart TB\n subgraph One\n a1 --> a2\n end\n a2 --> b1").unwrap();
+        assert_eq!(chart.subgraphs.len(), 1);
+        assert_eq!(chart.subgraphs[0].id, "One");
+        let sg = chart.node_index("a1").map(|i| chart.nodes[i].subgraph).unwrap();
+        assert_eq!(sg, Some(0));
+        // b1 is defined outside the subgraph.
+        let b1 = chart.node_index("b1").map(|i| chart.nodes[i].subgraph).unwrap();
+        assert_eq!(b1, None);
+    }
+
+    #[test]
+    fn subgraph_with_bracket_title() {
+        let chart = parse("flowchart TB\n subgraph s1[My Title]\n a\n end").unwrap();
+        assert_eq!(chart.subgraphs[0].id, "s1");
+        assert_eq!(chart.subgraphs[0].title, "My Title");
     }
 
     #[test]

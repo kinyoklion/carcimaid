@@ -24,12 +24,14 @@ pub enum Direction {
     RightLeft,
 }
 
-/// A flowchart: a directed graph of [`Node`]s connected by [`Edge`]s.
+/// A flowchart: a directed graph of [`Node`]s connected by [`Edge`]s, with
+/// optional [`Subgraph`] groupings.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Flowchart {
     pub direction: Direction,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    pub subgraphs: Vec<Subgraph>,
 }
 
 impl Flowchart {
@@ -37,6 +39,18 @@ impl Flowchart {
     pub fn node_index(&self, id: &str) -> Option<usize> {
         self.nodes.iter().position(|n| n.id == id)
     }
+}
+
+/// A `subgraph … end` grouping (rendered as a dagre cluster). Membership is
+/// recorded on each [`Node`] via [`Node::subgraph`]; nesting via [`Subgraph::parent`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subgraph {
+    /// Identifier (from `subgraph id[title]`, else derived from the title).
+    pub id: String,
+    /// Display title.
+    pub title: String,
+    /// Index into [`Flowchart::subgraphs`] of the enclosing subgraph, if nested.
+    pub parent: Option<usize>,
 }
 
 /// The outline shape of a flowchart node, selected by mermaid's bracket syntax.
@@ -63,6 +77,9 @@ pub struct Node {
     /// Display text. Defaults to the id when no label is given.
     pub label: String,
     pub shape: NodeShape,
+    /// Index into [`Flowchart::subgraphs`] of the subgraph this node belongs to,
+    /// if any (the subgraph in whose block the node first appeared).
+    pub subgraph: Option<usize>,
 }
 
 /// The line style of an edge.

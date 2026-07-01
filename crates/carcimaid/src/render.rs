@@ -26,7 +26,7 @@
 mod markers;
 
 use crate::ir::NodeShape;
-use crate::layout::{LaidOut, LaidOutFlowchart, PlacedEdge, PlacedNode};
+use crate::layout::{LaidOut, LaidOutFlowchart, PlacedCluster, PlacedEdge, PlacedNode};
 use std::fmt::Write;
 
 /// Diagram id prefix. mermaid generates a per-render id (`my-svg`, etc.); the
@@ -72,7 +72,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     s.push_str(&markers::block(ID));
     s.push_str(r#"<g class="root">"#);
 
-    s.push_str(r#"<g class="clusters"></g>"#);
+    s.push_str(r#"<g class="clusters">"#);
+    for cluster in &chart.clusters {
+        render_cluster(&mut s, cluster);
+    }
+    s.push_str("</g>");
 
     s.push_str(r#"<g class="edgePaths">"#);
     for edge in &chart.edges {
@@ -110,6 +114,32 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 
     s.push_str("</svg>");
     s
+}
+
+fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
+    let x = cluster.cx - cluster.width / 2.0;
+    let y = cluster.cy - cluster.height / 2.0;
+    let _ = write!(
+        s,
+        r#"<g class="cluster" id="{}-{}" data-look="classic"><rect x="{}" y="{}" width="{}" height="{}"/>"#,
+        ID,
+        escape(&cluster.id),
+        round(x),
+        round(y),
+        round(cluster.width),
+        round(cluster.height),
+    );
+    // The label sits centred at the top of the cluster box.
+    let label_x = cluster.cx - crate::text::measure_width(&cluster.title, 16.0) / 2.0;
+    let _ = write!(
+        s,
+        r#"<g class="cluster-label" transform="translate({}, {})"><g>"#,
+        round(label_x),
+        round(y),
+    );
+    s.push_str(r#"<rect class="background"/>"#);
+    render_text(s, Some(&cluster.title), false);
+    s.push_str("</g></g></g>");
 }
 
 fn render_node(s: &mut String, node: &PlacedNode) {

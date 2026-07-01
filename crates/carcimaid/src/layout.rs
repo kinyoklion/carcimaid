@@ -28,6 +28,19 @@ pub struct LaidOutFlowchart {
     pub height: f64,
     pub nodes: Vec<PlacedNode>,
     pub edges: Vec<PlacedEdge>,
+    pub clusters: Vec<PlacedCluster>,
+}
+
+/// A subgraph cluster with concrete geometry (its bounding box).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedCluster {
+    pub id: String,
+    pub title: String,
+    /// Center of the cluster box.
+    pub cx: f64,
+    pub cy: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 /// A node with a center position and a box size.
@@ -109,6 +122,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             height: MARGIN * 2.0,
             nodes: Vec::new(),
             edges: Vec::new(),
+            clusters: Vec::new(),
         };
     }
 
@@ -123,6 +137,20 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             i.to_string(),
             Some(NodeLabel { width: w, height: h, ..Default::default() }),
         );
+    }
+    // Register subgraph clusters and the compound parent relationships.
+    for ci in 0..chart.subgraphs.len() {
+        g.set_node(cluster_key(ci), Some(NodeLabel::default()));
+    }
+    for (ci, sg) in chart.subgraphs.iter().enumerate() {
+        if let Some(p) = sg.parent {
+            g.set_parent(&cluster_key(ci), Some(&cluster_key(p)));
+        }
+    }
+    for (ni, node) in chart.nodes.iter().enumerate() {
+        if let Some(ci) = node.subgraph {
+            g.set_parent(&ni.to_string(), Some(&cluster_key(ci)));
+        }
     }
     for (i, e) in chart.edges.iter().enumerate() {
         // Reserve space for an edge label so dagre routes around it, matching
@@ -191,6 +219,23 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         })
         .collect();
 
+    let clusters: Vec<PlacedCluster> = chart
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(ci, sg)| {
+            let n = g.node(&cluster_key(ci));
+            PlacedCluster {
+                id: sg.id.clone(),
+                title: sg.title.clone(),
+                cx: n.and_then(|n| n.x).unwrap_or(0.0),
+                cy: n.and_then(|n| n.y).unwrap_or(0.0),
+                width: n.map(|n| n.width).unwrap_or(0.0),
+                height: n.map(|n| n.height).unwrap_or(0.0),
+            }
+        })
+        .collect();
+
     let (width, height) = g
         .graph_label::<GraphLabel>()
         .map(|gl| (gl.width, gl.height))
@@ -202,7 +247,14 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         height,
         nodes,
         edges,
+        clusters,
     }
+}
+
+/// dagre node key for the subgraph at index `i` (kept distinct from node keys,
+/// which are plain indices).
+fn cluster_key(i: usize) -> String {
+    format!("cluster{i}")
 }
 
 #[cfg(test)]
