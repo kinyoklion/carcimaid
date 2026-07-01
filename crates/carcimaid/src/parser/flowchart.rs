@@ -277,6 +277,11 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) ->
             chart.nodes[idx].label = label;
             chart.nodes[idx].shape = shape;
         }
+        // A node belongs to the first subgraph whose block references it, even
+        // if it was defined earlier (e.g. by an edge before the block).
+        if current.is_some() && chart.nodes[idx].subgraph.is_none() {
+            chart.nodes[idx].subgraph = current;
+        }
         return idx;
     }
     let label = label.unwrap_or_else(|| id.clone());
