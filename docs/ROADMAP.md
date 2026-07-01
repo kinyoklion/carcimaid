@@ -31,18 +31,29 @@ Unsupported structural features, by corpus frequency:
 | `<br>` / multi-line labels | 18% | extra `tspan` rows; size + child-count diffs |
 | `click`/links | 13% | mermaid wraps the node in `<a>` |
 
+## On the diff-count metric
+
+Raw diff-count is **noisy for partially-correct complex diagrams**: the
+comparator matches children positionally, so once a subtree we don't yet model
+appears, everything after it misaligns and the count balloons (or, conversely,
+an *unrendered* feature makes the tree bail early and undercounts). Adding a
+feature can therefore *raise* the count while making the output more correct —
+e.g. rendering clusters exposed more comparable-but-imperfect detail on complex
+subgraphs. **Exact passes (0 diffs) is the reliable north star**; tag-similarity
+is a useful secondary. Judge features by passes + near-passes, not total diffs.
+
 ## Next milestones, in impact order
 
 1. **Text measurement** — DONE (f112648). DejaVu Sans via `ttf-parser`.
-2. **Dagre layout + curveBasis edges** — DONE (b6f2c39). Drives the `dagre`
-   crate with mermaid's params; edges via a d3-curveBasis reimplementation with
-   4px arrow clipping. First exact passes.
-3. **Subgraphs / clusters** — parse `subgraph … end`, model as dagre compound
-   nodes, render the `g.clusters` group. Highest-frequency unsupported feature
-   (31%); unblocks the biggest `ChildCountMismatch` cascades.
+2. **Dagre layout + curveBasis edges** — DONE (b6f2c39). First exact passes.
+3. **Subgraphs / clusters** — DONE (4d1dcb8, 31d829f). Parse `subgraph … end`,
+   model as dagre compound nodes, render `g.clusters`. Clean subgraph diagrams
+   now pass; no effect on non-subgraph diagrams. Remaining subgraph gaps:
+   node/cluster emission ordering, nested-subgraph-by-reference, per-subgraph
+   `direction`.
 4. **Node shape coverage** — mermaid's full shape set (hexagon, trapezoids,
    cylinder, subroutine, …) as the `polygon`/`path` elements mermaid emits, with
-   per-shape padding.
+   per-shape padding. (24% of corpus.)
 5. **Rich labels** — `<br>` line breaks and multi-row text (one `tspan` row per
-   line), then markdown (`**bold**`).
+   line), then markdown (`**bold**`). (18% of corpus.)
 6. **Polish** — `<a>` wrapping for `click`/`href` nodes, `<title>`/`<desc>`.
