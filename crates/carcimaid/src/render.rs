@@ -56,22 +56,25 @@ pub fn to_svg(diagram: &LaidOut) -> String {
 
 fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     let mut s = String::new();
-    let w = round(chart.width);
+    // Content bounding box (origin + size) computed by layout, including edge
+    // overflow beyond the node band.
+    let (ox, oy) = (chart.origin_x, chart.origin_y);
+    let center_x = ox + chart.width / 2.0;
     // A visible title reserves TITLE_SPACE above the diagram (viewBox top shifts
     // up, height grows) and, when it's wider than the content, widens and
     // re-centres the viewBox — mermaid's viewBox is the getBBox of content plus
     // the centred title text (font-size 18) ± an 8px margin.
     let title_space = if chart.title.is_some() { TITLE_SPACE } else { 0.0 };
     let vh = round(chart.height + title_space);
-    let vy = round(-title_space);
+    let vy = round(oy - title_space);
     let (vx, vw) = match &chart.title {
         Some(t) => {
             let tw = crate::text::measure_width(t, TITLE_FONT_SIZE);
-            let left = (chart.width / 2.0 - tw / 2.0).min(TITLE_MARGIN);
-            let right = (chart.width / 2.0 + tw / 2.0).max(chart.width - TITLE_MARGIN);
-            (round(left - TITLE_MARGIN), round(right - left + 2.0 * TITLE_MARGIN))
+            let left = ox.min(center_x - tw / 2.0 - TITLE_MARGIN);
+            let right = (ox + chart.width).max(center_x + tw / 2.0 + TITLE_MARGIN);
+            (round(left), round(right - left))
         }
-        None => (0.0, w),
+        None => (round(ox), round(chart.width)),
     };
     // Accessibility metadata references (only present when acc* were given).
     let mut aria = String::new();
@@ -161,7 +164,7 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         let _ = write!(
             s,
             r#"<text text-anchor="middle" x="{}" y="-25" class="flowchartTitleText">{}</text>"#,
-            round(w / 2.0),
+            round(center_x),
             escape(t),
         );
     }

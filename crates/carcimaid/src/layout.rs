@@ -11,7 +11,7 @@ use crate::ir::{Diagram, Direction, Flowchart, NodeShape};
 use crate::Result;
 
 use dagre::graph::{Graph, GraphOptions};
-use dagre::layout::types::{EdgeLabel, GraphLabel, LayoutOptions, NodeLabel, RankDir};
+use dagre::layout::types::{EdgeLabel, LayoutOptions, NodeLabel, RankDir};
 use dagre::layout::layout as dagre_layout;
 
 /// A laid-out diagram: geometry plus enough of the model to render.
@@ -24,6 +24,9 @@ pub enum LaidOut {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaidOutFlowchart {
     pub direction: Direction,
+    /// Top-left of the content bounding box (viewBox origin before any title).
+    pub origin_x: f64,
+    pub origin_y: f64,
     pub width: f64,
     pub height: f64,
     pub nodes: Vec<PlacedNode>,
@@ -168,6 +171,8 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     if chart.nodes.is_empty() {
         return LaidOutFlowchart {
             direction: chart.direction,
+            origin_x: 0.0,
+            origin_y: 0.0,
             width: MARGIN * 2.0,
             height: MARGIN * 2.0,
             nodes: Vec::new(),
@@ -295,13 +300,40 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         })
         .collect();
 
-    let (width, height) = g
-        .graph_label::<GraphLabel>()
-        .map(|gl| (gl.width, gl.height))
-        .unwrap_or((MARGIN * 2.0, MARGIN * 2.0));
+    // Content bounding box = union of node boxes, cluster boxes, and every edge
+    // waypoint. Edges (curved back-edges especially) can extend beyond the node
+    // band, so the viewBox must include them or they get clipped — this is what
+    // mermaid's getBBox-based viewBox captures.
+    let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
+    let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
+    let mut expand = |x: f64, y: f64| {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    };
+    for n in &nodes {
+        expand(n.cx - n.width / 2.0, n.cy - n.height / 2.0);
+        expand(n.cx + n.width / 2.0, n.cy + n.height / 2.0);
+    }
+    for c in &clusters {
+        expand(c.cx - c.width / 2.0, c.cy - c.height / 2.0);
+        expand(c.cx + c.width / 2.0, c.cy + c.height / 2.0);
+    }
+    for e in &edges {
+        for &(x, y) in &e.points {
+            expand(x, y);
+        }
+    }
+    let origin_x = min_x - MARGIN;
+    let origin_y = min_y - MARGIN;
+    let width = (max_x - min_x) + 2.0 * MARGIN;
+    let height = (max_y - min_y) + 2.0 * MARGIN;
 
     LaidOutFlowchart {
         direction: chart.direction,
+        origin_x,
+        origin_y,
         width,
         height,
         nodes,
