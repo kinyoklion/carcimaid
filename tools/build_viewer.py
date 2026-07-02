@@ -106,7 +106,7 @@ HTML = """<!doctype html>
   #ours svg text, #ours svg .nodeLabel { fill:#333; }
   #ours svg .edgePaths path, #ours svg path.flowchart-link { fill:none; stroke:#333; stroke-width:1.5px; }
   #ours svg .arrowMarkerPath { fill:#333; stroke:#333; }
-  #ours svg .background rect, #ours svg .label-container ~ * .background { fill:transparent; }
+  #ours svg rect.background { fill:transparent; stroke:none; }
   .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
   pre { margin:0; padding:12px; background:#fff; border:1px solid var(--line); border-radius:8px;
         overflow:auto; max-height:30vh; font:12px/1.4 ui-monospace,Menlo,monospace; white-space:pre-wrap; }
