@@ -284,12 +284,14 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0);
         }
         NodeShape::Cylinder => {
-            // TODO: real cylinder is a <path>; approximate as a rounded rect.
+            // mermaid's `datastore` is a rect whose stroke-dasharray "{w} {h}"
+            // draws only the top and bottom edges, leaving the sides open.
             let (hw, hh) = (node.width / 2.0, node.height / 2.0);
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container" x="{}" y="{}" rx="5" ry="5" width="{}" height="{}"/>"#,
+                r#"<rect class="basic label-container" x="{}" y="{}" width="{}" height="{}" stroke-dasharray="{} {}"/>"#,
                 round(-hw), round(-hh), round(node.width), round(node.height),
+                round(node.width), round(node.height),
             );
         }
     }

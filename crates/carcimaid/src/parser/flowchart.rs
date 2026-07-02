@@ -16,64 +16,91 @@ use crate::Result;
 /// Parse a flowchart from full source (including its header line).
 pub fn parse(source: &str) -> Result<Flowchart> {
     let mut chart = Flowchart::default();
-    let mut lines = source.lines().map(str::trim).filter(|l| !l.is_empty());
-
-    // Header: `flowchart TD` / `graph LR`. The keyword is already validated by
-    // the dispatcher; here we only extract the optional direction token.
-    if let Some(header) = lines.next() {
-        if let Some(dir) = header.split_whitespace().nth(1) {
-            chart.direction = parse_direction(dir).unwrap_or_default();
-        }
-    }
 
     // Stack of enclosing subgraph indices (for nesting). The top is the current
     // subgraph that newly-defined nodes are assigned to.
     let mut stack: Vec<usize> = Vec::new();
-    // Inside a multi-line `accDescr { … }` accessibility block.
-    let mut in_acc_block = false;
+    let mut header_seen = false;
 
-    for line in lines {
-        if in_acc_block {
-            if line.contains('}') {
-                in_acc_block = false;
+    for stmt in split_statements(source) {
+        let stmt = stmt.trim();
+        if stmt.is_empty() {
+            continue;
+        }
+        if !header_seen {
+            // Header: `flowchart TD` / `graph LR` — take only the direction.
+            header_seen = true;
+            if let Some(dir) = stmt.split_whitespace().nth(1) {
+                chart.direction = parse_direction(dir).unwrap_or_default();
             }
             continue;
         }
-        if line.starts_with("%%") {
+        // Accessibility metadata (`accTitle: …`, `accDescr: …`, `accDescr { … }`)
+        // renders as <title>/<desc>, never as a node — skip it.
+        if stmt.starts_with("accTitle") || stmt.starts_with("accDescr") {
             continue;
         }
-        // Accessibility metadata (`accTitle: …`, `accDescr: …`, or a multi-line
-        // `accDescr { … }`) renders as <title>/<desc>, never as a node — skip it.
-        if line.starts_with("accTitle") || line.starts_with("accDescr") {
-            if line.starts_with("accDescr") && line.contains('{') && !line.contains('}') {
-                in_acc_block = true;
-            }
-            continue;
-        }
-        for stmt in line.split(';') {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
-            }
-            if let Some(rest) = subgraph_header(stmt) {
-                let parent = stack.last().copied();
-                let (id, title) = parse_subgraph_header(rest, chart.subgraphs.len());
-                chart.subgraphs.push(Subgraph { id, title, parent });
-                stack.push(chart.subgraphs.len() - 1);
-            } else if stmt == "end" {
-                stack.pop();
-            } else if is_directive_stmt(stmt) {
-                // Styling/interaction directives (`classDef`, `class`, `style`,
-                // `linkStyle`, `click`) and `direction` are not nodes/edges;
-                // skip them so they don't become phantom nodes. Their visual
-                // effect (classes/styles) is out of scope for structural diffing.
-            } else {
-                parse_statement(stmt, &mut chart, stack.last().copied());
-            }
+        if let Some(rest) = subgraph_header(stmt) {
+            let parent = stack.last().copied();
+            let (id, title) = parse_subgraph_header(rest, chart.subgraphs.len());
+            chart.subgraphs.push(Subgraph { id, title, parent });
+            stack.push(chart.subgraphs.len() - 1);
+        } else if stmt == "end" {
+            stack.pop();
+        } else if is_directive_stmt(stmt) {
+            // Styling/interaction directives (`classDef`, `class`, `style`,
+            // `linkStyle`, `click`) and `direction` are not nodes/edges; skip
+            // them so they don't become phantom nodes.
+        } else {
+            parse_statement(stmt, &mut chart, stack.last().copied());
         }
     }
 
     Ok(chart)
+}
+
+/// Split source into statements. A statement ends at `;` or a newline, but only
+/// at bracket depth 0 and outside quotes — so multi-line quoted labels (and
+/// `accDescr { … }` blocks) stay intact. `%%` starts a line comment.
+fn split_statements(source: &str) -> Vec<String> {
+    let mut stmts = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_quote {
+            cur.push(c);
+            if c == '"' {
+                in_quote = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_quote = true;
+                cur.push(c);
+            }
+            '%' if depth == 0 && chars.peek() == Some(&'%') => {
+                // Comment to end of line.
+                while chars.peek().is_some_and(|&n| n != '\n') {
+                    chars.next();
+                }
+            }
+            '[' | '(' | '{' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ']' | ')' | '}' => {
+                depth -= 1;
+                cur.push(c);
+            }
+            ';' | '\n' if depth <= 0 => stmts.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    stmts.push(cur);
+    stmts
 }
 
 /// If `stmt` opens a subgraph, return the text after the `subgraph` keyword.

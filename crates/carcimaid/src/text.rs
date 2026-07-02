@@ -45,26 +45,29 @@ pub fn measure_width(text: &str, font_size: f64) -> f64 {
 /// mermaid's default flowchart label wrapping width (config `wrappingWidth`).
 pub const WRAP_WIDTH: f64 = 200.0;
 
-/// Greedily wrap `label` into lines of words so each line's measured width stays
-/// within `max_width` (matching mermaid's label wrapping). A single word wider
-/// than `max_width` occupies its own line. Returns lines, each a list of words
-/// (without inter-word spaces).
+/// Wrap `label` into lines of words. Explicit newlines are honoured as forced
+/// line breaks; within each segment, words are greedily wrapped so each line's
+/// measured width stays within `max_width` (matching mermaid). A single word
+/// wider than `max_width` occupies its own line. Returns lines, each a list of
+/// words (without inter-word spaces); blank segments are dropped.
 pub fn wrap_label(label: &str, max_width: f64, font_size: f64) -> Vec<Vec<String>> {
     let mut lines: Vec<Vec<String>> = Vec::new();
-    let mut cur: Vec<String> = Vec::new();
-    for word in label.split_whitespace() {
-        if cur.is_empty() {
+    for segment in label.split('\n') {
+        let mut cur: Vec<String> = Vec::new();
+        for word in segment.split_whitespace() {
+            if cur.is_empty() {
+                cur.push(word.to_string());
+                continue;
+            }
+            let candidate = format!("{} {}", cur.join(" "), word);
+            if measure_width(&candidate, font_size) > max_width {
+                lines.push(std::mem::take(&mut cur));
+            }
             cur.push(word.to_string());
-            continue;
         }
-        let candidate = format!("{} {}", cur.join(" "), word);
-        if measure_width(&candidate, font_size) > max_width {
-            lines.push(std::mem::take(&mut cur));
+        if !cur.is_empty() {
+            lines.push(cur);
         }
-        cur.push(word.to_string());
-    }
-    if !cur.is_empty() {
-        lines.push(cur);
     }
     lines
 }
