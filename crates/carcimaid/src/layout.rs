@@ -71,6 +71,8 @@ pub struct PlacedEdge {
 // --- mermaid layout parameters (its flowchart defaults). ---
 const NODE_HEIGHT: f64 = 49.0;
 const FONT_SIZE: f64 = 16.0;
+/// Extra height per wrapped line (mermaid's 1.1em row step at 16px).
+const LINE_SPACING: f64 = 17.6;
 const NODE_SEP: f64 = 50.0;
 const RANK_SEP: f64 = 50.0;
 const EDGE_SEP: f64 = 20.0;
@@ -87,26 +89,33 @@ pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
 /// padding, derived empirically from mermaid's output (plain rect +60, rounded
 /// +30). Other shapes are approximated pending dedicated shape sizing.
 fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
-    let text_w = crate::text::measure_width(label, FONT_SIZE);
+    // Wrap the label the way mermaid does; the widest line drives node width and
+    // the line count drives extra height (1.1em ≈ 17.6px per additional line).
+    let lines = crate::text::wrap_label(label, crate::text::WRAP_WIDTH, FONT_SIZE);
+    let line_count = lines.len().max(1) as f64;
+    let text_w = lines
+        .iter()
+        .map(|l| crate::text::line_width(l, FONT_SIZE))
+        .fold(0.0_f64, f64::max);
+    let extra = (line_count - 1.0) * LINE_SPACING;
+
     match shape {
-        NodeShape::Rectangle => (text_w + 60.0, NODE_HEIGHT),
-        NodeShape::RoundedRectangle => (text_w + 30.0, NODE_HEIGHT),
-        // Rhombus (mermaid `question`): a square diamond of side s = w + h where
-        // w = bbox.width + padding and h = bbox.height + padding. Empirically the
-        // additive offset over our measured text width is a constant 49 for a
-        // single line; the box is s × s.
+        NodeShape::Rectangle => (text_w + 60.0, NODE_HEIGHT + extra),
+        NodeShape::RoundedRectangle => (text_w + 30.0, NODE_HEIGHT + extra),
+        // Rhombus (mermaid `question`): a square diamond of side s = w + h.
+        // Empirically the additive offset over our measured text width is 49 for
+        // a single line; extra lines grow it. The box is s × s.
         NodeShape::Rhombus => {
-            let s = text_w + 49.0;
+            let s = text_w + 49.0 + extra;
             (s, s)
         }
-        // Circle (mermaid `circle`): radius = bbox.width/2 + padding; the box is
-        // 2r × 2r. Empirically 2r ≈ measured text width + 14.8.
+        // Circle: 2r ≈ measured text width + 14.8; box is 2r × 2r.
         NodeShape::Circle => {
-            let s = text_w + 14.8;
+            let s = text_w + 14.8 + extra;
             (s, s)
         }
         // TODO: stadium has its own (path) geometry; still approximated.
-        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT),
+        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
     }
 }
 

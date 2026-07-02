@@ -42,6 +42,38 @@ pub fn measure_width(text: &str, font_size: f64) -> f64 {
     total * scale
 }
 
+/// mermaid's default flowchart label wrapping width (config `wrappingWidth`).
+pub const WRAP_WIDTH: f64 = 200.0;
+
+/// Greedily wrap `label` into lines of words so each line's measured width stays
+/// within `max_width` (matching mermaid's label wrapping). A single word wider
+/// than `max_width` occupies its own line. Returns lines, each a list of words
+/// (without inter-word spaces).
+pub fn wrap_label(label: &str, max_width: f64, font_size: f64) -> Vec<Vec<String>> {
+    let mut lines: Vec<Vec<String>> = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    for word in label.split_whitespace() {
+        if cur.is_empty() {
+            cur.push(word.to_string());
+            continue;
+        }
+        let candidate = format!("{} {}", cur.join(" "), word);
+        if measure_width(&candidate, font_size) > max_width {
+            lines.push(std::mem::take(&mut cur));
+        }
+        cur.push(word.to_string());
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// Measured width of a wrapped line (its words joined by single spaces).
+pub fn line_width(words: &[String], font_size: f64) -> f64 {
+    measure_width(&words.join(" "), font_size)
+}
+
 /// Line height in px at `font_size`, from the font's ascent/descent/line-gap.
 pub fn line_height(font_size: f64) -> f64 {
     let face = face();
@@ -53,6 +85,19 @@ pub fn line_height(font_size: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wraps_to_width_and_splits_words() {
+        // A short label stays on one line, one word per token.
+        let one = wrap_label("Is it ready?", WRAP_WIDTH, 16.0);
+        assert_eq!(one, vec![vec!["Is", "it", "ready?"]]);
+        // A long label wraps into multiple lines, each within the width.
+        let many = wrap_label("This is a fairly long label that should wrap", WRAP_WIDTH, 16.0);
+        assert!(many.len() >= 2, "expected wrapping, got {many:?}");
+        for line in &many {
+            assert!(line_width(line, 16.0) <= WRAP_WIDTH || line.len() == 1);
+        }
+    }
 
     #[test]
     fn widths_are_positive_and_ordered() {

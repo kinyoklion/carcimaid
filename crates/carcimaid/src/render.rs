@@ -38,6 +38,8 @@ const ID: &str = "my-svg";
 
 /// Approximate single-line label height in px (mermaid ~19 at 16px font).
 const LABEL_HEIGHT: f64 = 19.0;
+/// Extra height per wrapped line (mermaid's 1.1em row step at 16px).
+const LINE_SPACING: f64 = 17.6;
 
 /// Render a laid-out diagram to an SVG document string.
 pub fn to_svg(diagram: &LaidOut) -> String {
@@ -152,11 +154,14 @@ fn render_node(s: &mut String, node: &PlacedNode) {
         round(node.cy),
     );
     render_shape(s, node);
-    // g.label is offset up by half the label height, matching mermaid.
+    // g.label is offset up by half the label block height so the (possibly
+    // multi-line) text is vertically centred, matching mermaid.
+    let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0).len().max(1);
+    let block_h = LABEL_HEIGHT + (n as f64 - 1.0) * LINE_SPACING;
     let _ = write!(
         s,
         r#"<g class="label" transform="translate(0, {})"><rect/><g>"#,
-        round(-LABEL_HEIGHT / 2.0),
+        round(-block_h / 2.0),
     );
     s.push_str(r#"<rect class="background"/>"#);
     render_text(s, Some(&node.label), false);
@@ -300,26 +305,45 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
     }
 }
 
-/// Emit mermaid's nested `<text><tspan.outer><tspan.inner>` label structure.
-/// With `label = None` the inner tspan is omitted (mermaid self-closes the
-/// outer tspan for empty labels). `anchor` adds `text-anchor="middle"`, which
-/// mermaid sets on edge labels but not node labels.
+/// Emit mermaid's nested label structure: a `<text>` containing one
+/// `<tspan.text-outer-tspan.row>` per wrapped line, each holding one
+/// `<tspan.text-inner-tspan>` per word (the first word of a row has no leading
+/// space, the rest are ` word`). With `label = None` a single empty row is
+/// emitted (mermaid's shape for an unlabelled edge). `anchor` adds
+/// `text-anchor="middle"` (edge labels) on the `<text>` and each row.
 fn render_text(s: &mut String, label: Option<&str>, anchor: bool) {
     let ta = if anchor { r#" text-anchor="middle""# } else { "" };
-    let _ = write!(
-        s,
-        r#"<text y="{y}"{ta}><tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"{ta}>"#,
-        y = round(-LABEL_HEIGHT / 2.0 - 0.6),
-        ta = ta,
-    );
-    if let Some(label) = label {
+    let _ = write!(s, r#"<text y="{y}"{ta}>"#, y = round(-LABEL_HEIGHT / 2.0 - 0.6), ta = ta);
+
+    let lines = label
+        .map(|l| crate::text::wrap_label(l, crate::text::WRAP_WIDTH, 16.0))
+        .unwrap_or_default();
+
+    if lines.is_empty() {
+        // Empty label: a single self-closed outer row (matches mermaid).
         let _ = write!(
             s,
-            r#"<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">{}</tspan>"#,
-            escape(label),
+            r#"<tspan class="text-outer-tspan row" x="0" y="-0.1em" dy="1.1em"{ta}></tspan>"#,
         );
+    } else {
+        for (i, words) in lines.iter().enumerate() {
+            let y = num(-0.1 + i as f64 * 1.1);
+            let _ = write!(
+                s,
+                r#"<tspan class="text-outer-tspan row" x="0" y="{y}em" dy="1.1em"{ta}>"#,
+            );
+            for (j, word) in words.iter().enumerate() {
+                let text = if j == 0 { word.clone() } else { format!(" {word}") };
+                let _ = write!(
+                    s,
+                    r#"<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">{}</tspan>"#,
+                    escape(&text),
+                );
+            }
+            s.push_str("</tspan>");
+        }
     }
-    s.push_str("</tspan></text>");
+    s.push_str("</text>");
 }
 
 /// Render a path through `points` as a B-spline, matching d3's `curveBasis`
