@@ -51,18 +51,35 @@ pub fn to_svg(diagram: &LaidOut) -> String {
 fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     let mut s = String::new();
     let (w, h) = (round(chart.width), round(chart.height));
+    // Accessibility metadata references (only present when acc* were given).
+    let mut aria = String::new();
+    if chart.acc_title.is_some() {
+        let _ = write!(aria, r#" aria-labelledby="chart-title-{ID}""#);
+    }
+    if chart.acc_descr.is_some() {
+        let _ = write!(aria, r#" aria-describedby="chart-desc-{ID}""#);
+    }
     let _ = write!(
         s,
         concat!(
             r#"<svg id="{id}" width="{w}" xmlns="http://www.w3.org/2000/svg" "#,
             r#"xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" "#,
             r#"height="{h}" viewBox="0 0 {w} {h}" role="graphics-document document" "#,
-            r#"aria-roledescription="flowchart-v2" style="background-color: white;">"#,
+            r#"aria-roledescription="flowchart-v2"{aria} style="background-color: white;">"#,
         ),
         id = ID,
         w = w,
         h = h,
+        aria = aria,
     );
+
+    // <title>/<desc> from accTitle/accDescr, before <style> (mermaid's order).
+    if let Some(t) = &chart.acc_title {
+        let _ = write!(s, r#"<title id="chart-title-{ID}">{}</title>"#, escape(t));
+    }
+    if let Some(d) = &chart.acc_descr {
+        let _ = write!(s, r#"<desc id="chart-desc-{ID}">{}</desc>"#, escape(d));
+    }
 
     // 1. <style> — a focused theme mirroring mermaid's defaults. Crucially it
     //    centres node labels (`text-anchor:middle`) and gives edge labels a

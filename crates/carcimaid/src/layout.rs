@@ -29,6 +29,8 @@ pub struct LaidOutFlowchart {
     pub nodes: Vec<PlacedNode>,
     pub edges: Vec<PlacedEdge>,
     pub clusters: Vec<PlacedCluster>,
+    pub acc_title: Option<String>,
+    pub acc_descr: Option<String>,
 }
 
 /// A subgraph cluster with concrete geometry (its bounding box).
@@ -170,6 +172,8 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             nodes: Vec::new(),
             edges: Vec::new(),
             clusters: Vec::new(),
+            acc_title: chart.acc_title.clone(),
+            acc_descr: chart.acc_descr.clone(),
         };
     }
 
@@ -301,6 +305,8 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         nodes,
         edges,
         clusters,
+        acc_title: chart.acc_title.clone(),
+        acc_descr: chart.acc_descr.clone(),
     }
 }
 

@@ -32,6 +32,10 @@ pub struct Flowchart {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub subgraphs: Vec<Subgraph>,
+    /// Accessibility title (`accTitle:`) — rendered as `<title>`.
+    pub acc_title: Option<String>,
+    /// Accessibility description (`accDescr:`/`accDescr { … }`) — as `<desc>`.
+    pub acc_descr: Option<String>,
 }
 
 impl Flowchart {

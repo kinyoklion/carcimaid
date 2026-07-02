@@ -26,18 +26,18 @@ fn face() -> &'static Face<'static> {
 /// flowcharts the difference is sub-pixel and within the comparison tolerance.
 pub fn measure_width(text: &str, font_size: f64) -> f64 {
     let face = face();
-    let scale = font_size / face.units_per_em() as f64;
-    let space = face
-        .glyph_index(' ')
-        .and_then(|g| face.glyph_hor_advance(g))
-        .unwrap_or(0);
+    let upem = face.units_per_em() as f64;
+    let scale = font_size / upem;
     let mut total: f64 = 0.0;
     for ch in text.chars() {
-        let advance = match face.glyph_index(ch) {
-            Some(g) => face.glyph_hor_advance(g).unwrap_or(space),
-            None => space, // unknown glyph: approximate with a space's width
+        let advance = match face.glyph_index(ch).and_then(|g| face.glyph_hor_advance(g)) {
+            Some(a) => a as f64,
+            // Glyphs DejaVu lacks (notably CJK) render full-width (1em) in the
+            // fonts the mermaid CLI falls back to (Noto Sans CJK), so measure
+            // them as one em rather than a space.
+            None => upem,
         };
-        total += advance as f64;
+        total += advance;
     }
     total * scale
 }

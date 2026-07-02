@@ -35,9 +35,19 @@ pub fn parse(source: &str) -> Result<Flowchart> {
             }
             continue;
         }
-        // Accessibility metadata (`accTitle: …`, `accDescr: …`, `accDescr { … }`)
-        // renders as <title>/<desc>, never as a node — skip it.
-        if stmt.starts_with("accTitle") || stmt.starts_with("accDescr") {
+        // Accessibility metadata renders as <title>/<desc>, not as a node.
+        if let Some(rest) = stmt.strip_prefix("accTitle") {
+            chart.acc_title = Some(rest.trim().trim_start_matches(':').trim().to_string());
+            continue;
+        }
+        if let Some(rest) = stmt.strip_prefix("accDescr") {
+            let rest = rest.trim();
+            let text = if let Some(inner) = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
+                inner.trim() // multi-line `accDescr { … }`
+            } else {
+                rest.trim_start_matches(':').trim()
+            };
+            chart.acc_descr = Some(text.to_string());
             continue;
         }
         if let Some(rest) = subgraph_header(stmt) {
