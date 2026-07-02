@@ -221,6 +221,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             edgesep: EDGE_SEP,
             marginx: MARGIN,
             marginy: MARGIN,
+            tie_keep_first: true,
             ..Default::default()
         }),
     );
