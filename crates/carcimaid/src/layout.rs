@@ -29,6 +29,7 @@ pub struct LaidOutFlowchart {
     pub nodes: Vec<PlacedNode>,
     pub edges: Vec<PlacedEdge>,
     pub clusters: Vec<PlacedCluster>,
+    pub title: Option<String>,
     pub acc_title: Option<String>,
     pub acc_descr: Option<String>,
 }
@@ -172,6 +173,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             nodes: Vec::new(),
             edges: Vec::new(),
             clusters: Vec::new(),
+            title: chart.title.clone(),
             acc_title: chart.acc_title.clone(),
             acc_descr: chart.acc_descr.clone(),
         };
@@ -305,6 +307,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         nodes,
         edges,
         clusters,
+        title: chart.title.clone(),
         acc_title: chart.acc_title.clone(),
         acc_descr: chart.acc_descr.clone(),
     }

@@ -511,6 +511,29 @@ mod tests {
     }
 
     #[test]
+    fn multiline_quoted_label_is_one_node() {
+        // A label spanning several physical lines must be one node, not several.
+        let chart = parse("flowchart LR\n a[\"\nline one\nline two\n\"] --> b").unwrap();
+        assert_eq!(chart.nodes.len(), 2);
+        assert_eq!(chart.nodes[0].id, "a");
+        assert!(chart.nodes[0].label.contains("line one") && chart.nodes[0].label.contains("line two"));
+    }
+
+    #[test]
+    fn captures_acc_and_frontmatter_title() {
+        // accTitle/accDescr captured; frontmatter title set by the dispatcher.
+        let d = crate::parser::parse(
+            "---\ntitle: My Chart\n---\nflowchart LR\n accTitle: Acc T\n accDescr: Acc D\n A --> B",
+        )
+        .unwrap();
+        let crate::ir::Diagram::Flowchart(f) = d;
+        assert_eq!(f.title.as_deref(), Some("My Chart"));
+        assert_eq!(f.acc_title.as_deref(), Some("Acc T"));
+        assert_eq!(f.acc_descr.as_deref(), Some("Acc D"));
+        assert_eq!(f.nodes.len(), 2);
+    }
+
+    #[test]
     fn skips_accessibility_metadata() {
         let chart = parse(
             "flowchart LR\n accTitle: A title\n accDescr: A description\n A --> B",

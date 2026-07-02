@@ -11,14 +11,36 @@ pub mod flowchart;
 
 /// Parse mermaid source into a [`Diagram`].
 pub fn parse(source: &str) -> Result<Diagram> {
+    let title = frontmatter_title(source);
     let source = strip_frontmatter(source);
     let header = first_keyword(source)
         .ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
 
     match header {
-        "flowchart" | "graph" => Ok(Diagram::Flowchart(flowchart::parse(source)?)),
+        "flowchart" | "graph" => {
+            let mut f = flowchart::parse(source)?;
+            f.title = title; // visible title from frontmatter
+            Ok(Diagram::Flowchart(f))
+        }
         other => Err(Error::Unsupported(format!("diagram type `{other}`"))),
     }
+}
+
+/// Extract the `title:` from a leading YAML frontmatter block, if present.
+fn frontmatter_title(source: &str) -> Option<String> {
+    let mut lines = source.lines().skip_while(|l| l.trim().is_empty());
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for l in lines {
+        if l.trim() == "---" {
+            break;
+        }
+        if let Some(t) = l.trim().strip_prefix("title:") {
+            return Some(t.trim().trim_matches('"').to_string());
+        }
+    }
+    None
 }
 
 /// Strip a leading YAML frontmatter block (`---` … `---`), which mermaid uses

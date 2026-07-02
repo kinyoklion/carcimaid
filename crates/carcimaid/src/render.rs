@@ -40,6 +40,12 @@ const ID: &str = "my-svg";
 const LABEL_HEIGHT: f64 = 19.0;
 /// Extra height per wrapped line (mermaid's 1.1em row step at 16px).
 const LINE_SPACING: f64 = 17.6;
+/// Vertical space reserved above the diagram for a visible title.
+const TITLE_SPACE: f64 = 50.0;
+/// Font size of the visible title (mermaid `.flowchartTitleText`).
+const TITLE_FONT_SIZE: f64 = 18.0;
+/// Diagram margin used when a title widens the viewBox.
+const TITLE_MARGIN: f64 = 8.0;
 
 /// Render a laid-out diagram to an SVG document string.
 pub fn to_svg(diagram: &LaidOut) -> String {
@@ -50,7 +56,23 @@ pub fn to_svg(diagram: &LaidOut) -> String {
 
 fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     let mut s = String::new();
-    let (w, h) = (round(chart.width), round(chart.height));
+    let w = round(chart.width);
+    // A visible title reserves TITLE_SPACE above the diagram (viewBox top shifts
+    // up, height grows) and, when it's wider than the content, widens and
+    // re-centres the viewBox — mermaid's viewBox is the getBBox of content plus
+    // the centred title text (font-size 18) ± an 8px margin.
+    let title_space = if chart.title.is_some() { TITLE_SPACE } else { 0.0 };
+    let vh = round(chart.height + title_space);
+    let vy = round(-title_space);
+    let (vx, vw) = match &chart.title {
+        Some(t) => {
+            let tw = crate::text::measure_width(t, TITLE_FONT_SIZE);
+            let left = (chart.width / 2.0 - tw / 2.0).min(TITLE_MARGIN);
+            let right = (chart.width / 2.0 + tw / 2.0).max(chart.width - TITLE_MARGIN);
+            (round(left - TITLE_MARGIN), round(right - left + 2.0 * TITLE_MARGIN))
+        }
+        None => (0.0, w),
+    };
     // Accessibility metadata references (only present when acc* were given).
     let mut aria = String::new();
     if chart.acc_title.is_some() {
@@ -62,14 +84,16 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     let _ = write!(
         s,
         concat!(
-            r#"<svg id="{id}" width="{w}" xmlns="http://www.w3.org/2000/svg" "#,
+            r#"<svg id="{id}" width="{vw}" xmlns="http://www.w3.org/2000/svg" "#,
             r#"xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" "#,
-            r#"height="{h}" viewBox="0 0 {w} {h}" role="graphics-document document" "#,
+            r#"height="{vh}" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" "#,
             r#"aria-roledescription="flowchart-v2"{aria} style="background-color: white;">"#,
         ),
         id = ID,
-        w = w,
-        h = h,
+        vw = vw,
+        vx = vx,
+        vh = vh,
+        vy = vy,
         aria = aria,
     );
 
@@ -131,6 +155,16 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         ),
         id = ID,
     );
+
+    // 4. Visible title (last svg child), horizontally centred above the diagram.
+    if let Some(t) = &chart.title {
+        let _ = write!(
+            s,
+            r#"<text text-anchor="middle" x="{}" y="-25" class="flowchartTitleText">{}</text>"#,
+            round(w / 2.0),
+            escape(t),
+        );
+    }
 
     s.push_str("</svg>");
     s

@@ -32,6 +32,9 @@ pub struct Flowchart {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub subgraphs: Vec<Subgraph>,
+    /// Visible diagram title (from YAML frontmatter `title:`) — rendered as a
+    /// `<text class="flowchartTitleText">` above the diagram.
+    pub title: Option<String>,
     /// Accessibility title (`accTitle:`) — rendered as `<title>`.
     pub acc_title: Option<String>,
     /// Accessibility description (`accDescr:`/`accDescr { … }`) — as `<desc>`.
