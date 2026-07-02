@@ -88,14 +88,26 @@ pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
 /// +30). Other shapes are approximated pending dedicated shape sizing.
 fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
     let text_w = crate::text::measure_width(label, FONT_SIZE);
-    let pad = match shape {
-        NodeShape::Rectangle => 60.0,
-        NodeShape::RoundedRectangle => 30.0,
-        // TODO: stadium/circle/rhombus have their own (larger) padding; refine
-        // when implementing full per-shape geometry.
-        NodeShape::Stadium | NodeShape::Circle | NodeShape::Rhombus => 60.0,
-    };
-    (text_w + pad, NODE_HEIGHT)
+    match shape {
+        NodeShape::Rectangle => (text_w + 60.0, NODE_HEIGHT),
+        NodeShape::RoundedRectangle => (text_w + 30.0, NODE_HEIGHT),
+        // Rhombus (mermaid `question`): a square diamond of side s = w + h where
+        // w = bbox.width + padding and h = bbox.height + padding. Empirically the
+        // additive offset over our measured text width is a constant 49 for a
+        // single line; the box is s × s.
+        NodeShape::Rhombus => {
+            let s = text_w + 49.0;
+            (s, s)
+        }
+        // Circle (mermaid `circle`): radius = bbox.width/2 + padding; the box is
+        // 2r × 2r. Empirically 2r ≈ measured text width + 14.8.
+        NodeShape::Circle => {
+            let s = text_w + 14.8;
+            (s, s)
+        }
+        // TODO: stadium has its own (path) geometry; still approximated.
+        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT),
+    }
 }
 
 fn rank_dir(dir: Direction) -> RankDir {
@@ -265,6 +277,14 @@ mod tests {
     fn flowchart(src: &str) -> LaidOutFlowchart {
         match layout(&parser::parse(src).unwrap()).unwrap() {
             LaidOut::Flowchart(f) => f,
+        }
+    }
+
+    #[test]
+    fn rhombus_and_circle_are_square() {
+        let f = flowchart("flowchart TD\n A{Ready} --> B((Go))");
+        for n in &f.nodes {
+            assert!((n.width - n.height).abs() < 1e-9, "{} not square: {}x{}", n.id, n.width, n.height);
         }
     }
 

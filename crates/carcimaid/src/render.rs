@@ -191,20 +191,29 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             );
         }
         NodeShape::Circle => {
-            let r = node.width.max(node.height) / 2.0;
-            let _ = write!(s, r#"<circle class="basic label-container" r="{}"/>"#, round(r));
-        }
-        NodeShape::Rhombus => {
-            // Diamond around the origin.
+            // Centred at the node group's origin (the group is already
+            // translated to the node centre), matching mermaid's `cx=0 cy=0`.
             let _ = write!(
                 s,
-                r#"<polygon class="label-container" points="{},0 {},{} 0,{} {},{}"/>"#,
-                round(hw),
-                round(node.width),
-                round(-hh),
-                round(-node.height),
-                round(-hw),
-                round(-hh),
+                r#"<circle class="basic label-container" cx="0" cy="0" r="{}"/>"#,
+                round(node.width / 2.0),
+            );
+        }
+        NodeShape::Rhombus => {
+            // mermaid `question`: a square diamond of side `side`, points laid
+            // out in [0,side]×[-side,0] then translated to centre it.
+            let side = node.width;
+            let _ = write!(
+                s,
+                r#"<polygon class="label-container" points="{},0 {},{} {},{} 0,{}" transform="translate({}, {})"/>"#,
+                round(side / 2.0),
+                round(side),
+                round(-side / 2.0),
+                round(side / 2.0),
+                round(-side),
+                round(-side / 2.0),
+                round(-side / 2.0 + 0.5),
+                round(side / 2.0),
             );
         }
     }
