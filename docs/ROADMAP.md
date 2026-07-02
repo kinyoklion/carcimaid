@@ -6,17 +6,17 @@ Run it yourself with `cargo run -p compliance -- --corpus corpus/flowchart/merma
 
 ## Baseline snapshot (flowchart corpus)
 
-After text metrics + dagre + subgraphs + rhombus/circle (commit 986d6b1):
+After text metrics + dagre + subgraphs + shapes + wrapping + directives (a50bb49):
 
 - 199 diagrams, 196 compared (3 are unrenderable by the mermaid CLI itself).
-- **Exact passes: 6.** Geometry is correct: node coords, edge curves, viewBox,
-  clusters, and rhombus/circle shapes all match byte-for-byte where structure
-  aligns. Synthetic single-word rhombus/circle diagrams pass.
-- **Label wrapping is now the dominant gate**: nearly every corpus diagram using
-  a rhombus/circle (or a long rect label) has a multi-word label that mermaid
-  *wraps* into multiple `tspan` rows; we emit one row, so those diagrams can't
-  reach 0 diffs despite exact geometry. This blocks the next batch of passes.
-- Per-case diffs: median ~24 (noisy — judge by passes, below).
+- **Exact passes: 14** (was 6). ≤5 diffs: 30; ≤10 diffs: 48.
+- Geometry is correct (node coords, edge curves, viewBox, clusters,
+  rhombus/circle); labels wrap into per-word `tspan` rows; `classDef`/`class`/
+  `style`/`linkStyle`/`click` directives and `:::class` suffixes no longer
+  create phantom nodes.
+- Known limits: long single-line labels can miss by ~1px (our advance-width sum
+  runs ~0.04px/char under mermaid's browser `getBBox`); remaining unsupported
+  features below.
 
 **Key finding:** node coordinates, edge `curveBasis` routing, and viewBox now
 match mermaid *exactly* wherever the element trees line up (that's the 5 passes).
@@ -64,8 +64,20 @@ is a useful secondary. Judge features by passes + near-passes, not total diffs.
    needs empirical calibration rather than a shared padding constant. Remaining:
    polygon family (hexagon/trapezoids/parallelogram/subroutine — additive,
    calibratable) and path shapes (stadium/cylinder — bezier/arc paths, hard).
-5. **Rich labels / wrapping** — mermaid wraps labels to a max width, emitting one
-   `tspan` row per line; narrow shapes (diamonds) wrap sooner. This is entangled
-   with shapes (a rhombus with a multi-word label wraps) and gates many
-   near-passes. `<br>` explicit breaks + markdown (`**bold**`) also here. (18%+.)
-6. **Polish** — `<a>` wrapping for `click`/`href` nodes, `<title>`/`<desc>`.
+5. **Label wrapping + per-word tspans** — DONE (91d1ade). Greedy wrap to width
+   200; one outer `row` tspan per line, one inner tspan per word.
+6. **Directives** — DONE (a50bb49). Skip `classDef`/`class`/`style`/`linkStyle`/
+   `click` and strip `:::class`; was the biggest single unlock (passes 6→14).
+
+## Remaining (long tail, by diff frequency)
+
+- **More node shapes** — path family (stadium/cylinder → `<path>`, 39 diffs) and
+  polygon family (hexagon/trapezoid/parallelogram/subroutine → `<polygon>`, 33)
+  still render as `rect`. Polygon family is calibratable like rhombus; path
+  family (bezier/arc `d`) is hard.
+- **`<a>` link wrapping** — `click`/`href` nodes: mermaid wraps the node group in
+  `<a>` (45 diffs).
+- **`g` vs `rect` (81)** — largest tag mismatch; needs investigation (likely
+  subgraph node emission ordering / nested clusters).
+- **`<br>` breaks + markdown** (`**bold**`) labels.
+- **Metric**: raw diff-count is noisy; consider a matched-element ratio.
