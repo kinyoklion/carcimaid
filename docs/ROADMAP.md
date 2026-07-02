@@ -6,12 +6,17 @@ Run it yourself with `cargo run -p compliance -- --corpus corpus/flowchart/merma
 
 ## Baseline snapshot (flowchart corpus)
 
-After text measurement + dagre layout (commit b6f2c39):
+After text metrics + dagre + subgraphs + rhombus/circle (commit 986d6b1):
 
 - 199 diagrams, 196 compared (3 are unrenderable by the mermaid CLI itself).
-- **Exact passes: 5** (e.g. `simple-chain` — node coords, edge curves, viewBox
-  all byte-for-byte). Geometry is now correct.
-- Per-case diffs: median **24** (little aggregate change — see below).
+- **Exact passes: 6.** Geometry is correct: node coords, edge curves, viewBox,
+  clusters, and rhombus/circle shapes all match byte-for-byte where structure
+  aligns. Synthetic single-word rhombus/circle diagrams pass.
+- **Label wrapping is now the dominant gate**: nearly every corpus diagram using
+  a rhombus/circle (or a long rect label) has a multi-word label that mermaid
+  *wraps* into multiple `tspan` rows; we emit one row, so those diagrams can't
+  reach 0 diffs despite exact geometry. This blocks the next batch of passes.
+- Per-case diffs: median ~24 (noisy — judge by passes, below).
 
 **Key finding:** node coordinates, edge `curveBasis` routing, and viewBox now
 match mermaid *exactly* wherever the element trees line up (that's the 5 passes).
@@ -51,9 +56,16 @@ is a useful secondary. Judge features by passes + near-passes, not total diffs.
    now pass; no effect on non-subgraph diagrams. Remaining subgraph gaps:
    node/cluster emission ordering, nested-subgraph-by-reference, per-subgraph
    `direction`.
-4. **Node shape coverage** — mermaid's full shape set (hexagon, trapezoids,
-   cylinder, subroutine, …) as the `polygon`/`path` elements mermaid emits, with
-   per-shape padding. (24% of corpus.)
-5. **Rich labels** — `<br>` line breaks and multi-row text (one `tspan` row per
-   line), then markdown (`**bold**`). (18% of corpus.)
+4. **Node shape coverage** — IN PROGRESS (986d6b1). rhombus + circle now exact
+   (full passes for single-line labels). Method: per-shape *additive* size
+   calibration over our measured text width (rhombus +49, circle 2r=text+14.8)
+   plus mermaid's point formula from source. Note: mermaid's internal
+   `text.getBBox()` can't be reproduced exactly from our metric, so each shape
+   needs empirical calibration rather than a shared padding constant. Remaining:
+   polygon family (hexagon/trapezoids/parallelogram/subroutine — additive,
+   calibratable) and path shapes (stadium/cylinder — bezier/arc paths, hard).
+5. **Rich labels / wrapping** — mermaid wraps labels to a max width, emitting one
+   `tspan` row per line; narrow shapes (diamonds) wrap sooner. This is entangled
+   with shapes (a rhombus with a multi-word label wraps) and gates many
+   near-passes. `<br>` explicit breaks + markdown (`**bold**`) also here. (18%+.)
 6. **Polish** — `<a>` wrapping for `click`/`href` nodes, `<title>`/`<desc>`.
