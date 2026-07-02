@@ -46,9 +46,11 @@ pub fn parse(source: &str) -> Result<Flowchart> {
                 stack.push(chart.subgraphs.len() - 1);
             } else if stmt == "end" {
                 stack.pop();
-            } else if is_direction_stmt(stmt) {
-                // `direction XX` inside a subgraph — per-subgraph direction is
-                // not yet modelled; skip so it isn't parsed as a node.
+            } else if is_directive_stmt(stmt) {
+                // Styling/interaction directives (`classDef`, `class`, `style`,
+                // `linkStyle`, `click`) and `direction` are not nodes/edges;
+                // skip them so they don't become phantom nodes. Their visual
+                // effect (classes/styles) is out of scope for structural diffing.
             } else {
                 parse_statement(stmt, &mut chart, stack.last().copied());
             }
@@ -69,9 +71,13 @@ fn subgraph_header(stmt: &str) -> Option<&str> {
     }
 }
 
-fn is_direction_stmt(stmt: &str) -> bool {
-    stmt.strip_prefix("direction")
-        .is_some_and(|r| r.trim_start() != r || r.is_empty())
+/// A statement that is a styling/interaction directive rather than a node or
+/// edge (matched on its first whitespace-delimited keyword).
+fn is_directive_stmt(stmt: &str) -> bool {
+    matches!(
+        stmt.split_whitespace().next(),
+        Some("direction" | "classDef" | "class" | "style" | "linkStyle" | "click")
+    )
 }
 
 /// Parse a subgraph header body into (id, title). Forms: `` (anonymous),
@@ -289,9 +295,29 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) ->
     chart.nodes.len() - 1
 }
 
+/// Strip a trailing `:::className` (inline class assignment) that appears at
+/// bracket depth 0, leaving the node id/shape spec.
+fn strip_class(endpoint: &str) -> &str {
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < endpoint.len() {
+        let c = endpoint[i..].chars().next().unwrap();
+        match c {
+            '[' | '(' | '{' => depth += 1,
+            ']' | ')' | '}' => depth -= 1,
+            ':' if depth == 0 && endpoint[i..].starts_with(":::") => {
+                return endpoint[..i].trim();
+            }
+            _ => {}
+        }
+        i += c.len_utf8();
+    }
+    endpoint
+}
+
 /// Parse an endpoint token into (id, shape, optional label).
 fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>) {
-    let endpoint = endpoint.trim();
+    let endpoint = strip_class(endpoint.trim());
     // Find where the shape bracket (if any) begins.
     let open = endpoint.find(['[', '(', '{']);
     let Some(open) = open else {
@@ -356,6 +382,25 @@ mod tests {
         let chart = parse("graph TD\n A -.-> B\n B ==> C").unwrap();
         assert_eq!(chart.edges[0].style, EdgeStyle::Dotted);
         assert_eq!(chart.edges[1].style, EdgeStyle::Thick);
+    }
+
+    #[test]
+    fn skips_directives_and_inline_class() {
+        let chart = parse(
+            "graph TD\n classDef default fill:#a34,stroke:#000\n hello --> default\n style hello fill:#f00\n click hello \"http://x\"",
+        )
+        .unwrap();
+        // Only the two real nodes exist; no phantom `classDef`/`style`/`click`.
+        let ids: Vec<_> = chart.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["hello", "default"]);
+    }
+
+    #[test]
+    fn strips_inline_class_suffix() {
+        let chart = parse("flowchart TD\n A:::foo --> B[label]:::bar").unwrap();
+        assert_eq!(chart.node_index("A"), Some(0));
+        assert_eq!(chart.nodes[1].id, "B");
+        assert_eq!(chart.nodes[1].label, "label");
     }
 
     #[test]
