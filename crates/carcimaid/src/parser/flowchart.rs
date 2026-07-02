@@ -326,15 +326,33 @@ fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>) {
 
     let id = endpoint[..open].trim().to_string();
     let rest = &endpoint[open..];
-    let (shape, inner) = if let Some(inner) = rest.strip_prefix("((").and_then(|r| r.strip_suffix("))")) {
+    // Two-character delimiters are checked before single-character ones. The
+    // `[/…/]`, `[/…\]`, `[\…\]`, `[\…/]` forms share an opener, so the closer
+    // disambiguates.
+    let strip = |pre: &str, suf: &str| rest.strip_prefix(pre).and_then(|r| r.strip_suffix(suf));
+    let (shape, inner) = if let Some(inner) = strip("((", "))") {
         (NodeShape::Circle, inner)
-    } else if let Some(inner) = rest.strip_prefix("([").and_then(|r| r.strip_suffix("])")) {
+    } else if let Some(inner) = strip("{{", "}}") {
+        (NodeShape::Hexagon, inner)
+    } else if let Some(inner) = strip("([", "])") {
         (NodeShape::Stadium, inner)
-    } else if let Some(inner) = rest.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+    } else if let Some(inner) = strip("[[", "]]") {
+        (NodeShape::Subroutine, inner)
+    } else if let Some(inner) = strip("[(", ")]") {
+        (NodeShape::Cylinder, inner)
+    } else if let Some(inner) = strip("[/", "/]") {
+        (NodeShape::Parallelogram, inner)
+    } else if let Some(inner) = strip("[/", "\\]") {
+        (NodeShape::Trapezoid, inner)
+    } else if let Some(inner) = strip("[\\", "\\]") {
+        (NodeShape::LeanLeft, inner)
+    } else if let Some(inner) = strip("[\\", "/]") {
+        (NodeShape::InvTrapezoid, inner)
+    } else if let Some(inner) = strip("[", "]") {
         (NodeShape::Rectangle, inner)
-    } else if let Some(inner) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+    } else if let Some(inner) = strip("(", ")") {
         (NodeShape::RoundedRectangle, inner)
-    } else if let Some(inner) = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
+    } else if let Some(inner) = strip("{", "}") {
         (NodeShape::Rhombus, inner)
     } else {
         // Unbalanced/unknown bracketing — treat the whole token as an id.
@@ -375,6 +393,26 @@ mod tests {
         assert_eq!(chart.nodes.len(), 3);
         assert_eq!(chart.edges.len(), 2);
         assert_eq!(chart.edges[1].label.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn parses_polygon_shapes() {
+        use NodeShape::*;
+        let chart = parse(
+            "flowchart TD\n a{{H}} --> b[[S]]\n b --> c[/P/]\n c --> d[/T\\]\n d --> e[\\L\\]\n e --> f[\\I/]\n f --> g[(C)]",
+        )
+        .unwrap();
+        let shapes: Vec<_> = chart.nodes.iter().map(|n| (n.id.as_str(), n.shape)).collect();
+        assert_eq!(
+            shapes,
+            [
+                ("a", Hexagon), ("b", Subroutine), ("c", Parallelogram),
+                ("d", Trapezoid), ("e", LeanLeft), ("f", InvTrapezoid), ("g", Cylinder),
+            ]
+        );
+        // Labels are extracted without the delimiters.
+        assert_eq!(chart.nodes[0].label, "H");
+        assert_eq!(chart.nodes[6].label, "C");
     }
 
     #[test]

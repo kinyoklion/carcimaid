@@ -67,6 +67,20 @@ pub enum NodeShape {
     Circle,
     /// `A([text])` — stadium / pill.
     Stadium,
+    /// `A{{text}}` — hexagon.
+    Hexagon,
+    /// `A[[text]]` — subroutine (rectangle with side bars).
+    Subroutine,
+    /// `A[/text/]` — parallelogram leaning right.
+    Parallelogram,
+    /// `A[\text\]` — parallelogram leaning left.
+    LeanLeft,
+    /// `A[/text\]` — trapezoid.
+    Trapezoid,
+    /// `A[\text/]` — inverted trapezoid.
+    InvTrapezoid,
+    /// `A[(text)]` — cylinder / database (rendered approximately for now).
+    Cylinder,
 }
 
 /// A flowchart node.

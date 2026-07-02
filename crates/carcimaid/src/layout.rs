@@ -73,6 +73,8 @@ const NODE_HEIGHT: f64 = 49.0;
 const FONT_SIZE: f64 = 16.0;
 /// Extra height per wrapped line (mermaid's 1.1em row step at 16px).
 const LINE_SPACING: f64 = 17.6;
+/// Single-line box height for polygon shapes (bbox.height + padding).
+const POLY_H: f64 = 34.0;
 const NODE_SEP: f64 = 50.0;
 const RANK_SEP: f64 = 50.0;
 const EDGE_SEP: f64 = 20.0;
@@ -114,8 +116,30 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
             let s = text_w + 14.8 + extra;
             (s, s)
         }
-        // TODO: stadium has its own (path) geometry; still approximated.
-        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
+        // Polygon shapes: box height 34 (bbox.height + padding) for a single
+        // line; widths calibrated per shape (bbox.width + shape padding). See
+        // render::render_shape for the matching point geometry.
+        NodeShape::Hexagon => {
+            let h = POLY_H + extra;
+            (text_w + h / 2.0 + 14.72, h) // w = bbox.w + 2*(h/4) + pad
+        }
+        NodeShape::Subroutine => {
+            let h = POLY_H + extra;
+            (text_w + 16.0 + 14.65, h) // + 2*FRAME_WIDTH(8) + pad
+        }
+        // Slanted shapes overflow their label box by h/2 on each side, so the
+        // dagre box (and viewBox/centering) must include that: width = label
+        // width + pad + h. The renderer recovers the inner width as width - h.
+        NodeShape::Parallelogram | NodeShape::LeanLeft => {
+            let h = POLY_H + extra;
+            (text_w + 14.29 + h, h)
+        }
+        NodeShape::Trapezoid | NodeShape::InvTrapezoid => {
+            let h = POLY_H + extra;
+            (text_w + 13.65 + h, h)
+        }
+        // TODO: stadium/cylinder are path shapes; still approximated as rects.
+        NodeShape::Stadium | NodeShape::Cylinder => (text_w + 60.0, NODE_HEIGHT + extra),
     }
 }
 

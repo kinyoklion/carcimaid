@@ -221,7 +221,69 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 round(side / 2.0),
             );
         }
+        NodeShape::Hexagon => {
+            let (w, h) = (node.width, node.height);
+            let m = h / 4.0;
+            emit_polygon(
+                s,
+                &[(m, 0.0), (w - m, 0.0), (w, -h / 2.0), (w - m, -h), (m, -h), (0.0, -h / 2.0)],
+                -w / 2.0,
+                h / 2.0,
+            );
+        }
+        NodeShape::Subroutine => {
+            let (w, h) = (node.width - 16.0, node.height); // inner width
+            emit_polygon(
+                s,
+                &[
+                    (0.0, 0.0), (w, 0.0), (w, -h), (0.0, -h), (0.0, 0.0),
+                    (-8.0, 0.0), (w + 8.0, 0.0), (w + 8.0, -h), (-8.0, -h), (-8.0, 0.0),
+                ],
+                -w / 2.0,
+                h / 2.0,
+            );
+        }
+        // Slanted shapes: recover the inner width (dagre width minus the h/2
+        // overflow on each side), and lay points out around it.
+        NodeShape::Parallelogram => {
+            let (w, h) = (node.width - node.height, node.height);
+            emit_polygon(s, &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)], -w / 2.0, h / 2.0);
+        }
+        NodeShape::LeanLeft => {
+            let (w, h) = (node.width - node.height, node.height);
+            emit_polygon(s, &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0);
+        }
+        NodeShape::Trapezoid => {
+            let (w, h) = (node.width - node.height, node.height);
+            emit_polygon(s, &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)], -w / 2.0, h / 2.0);
+        }
+        NodeShape::InvTrapezoid => {
+            let (w, h) = (node.width - node.height, node.height);
+            emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0);
+        }
+        NodeShape::Cylinder => {
+            // TODO: real cylinder is a <path>; approximate as a rounded rect.
+            let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+            let _ = write!(
+                s,
+                r#"<rect class="basic label-container" x="{}" y="{}" rx="5" ry="5" width="{}" height="{}"/>"#,
+                round(-hw), round(-hh), round(node.width), round(node.height),
+            );
+        }
     }
+}
+
+/// Emit a `<polygon class="label-container">` from `points` with a translate.
+fn emit_polygon(s: &mut String, points: &[(f64, f64)], tx: f64, ty: f64) {
+    s.push_str(r#"<polygon class="label-container" points=""#);
+    for (i, (x, y)) in points.iter().enumerate() {
+        if i > 0 {
+            s.push(' ');
+        }
+        let _ = write!(s, "{},{}", round(*x), round(*y));
+    }
+    // No space after the comma: matches mermaid's insertPolygonShape output.
+    let _ = write!(s, r#"" transform="translate({},{})"/>"#, round(tx), round(ty));
 }
 
 /// `L_<fromId>_<toId>_0`, mermaid's stable edge id (uses node ids, not indices).
