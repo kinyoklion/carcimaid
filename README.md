@@ -48,6 +48,28 @@ cargo run -p compliance -- --corpus corpus --artifacts artifacts
 cargo run -p compliance -- --no-oracle
 ```
 
+## Visual comparison viewer
+
+After a compliance run (which writes `artifacts/mermaid/<id>/{oracle,carcimaid}.svg`),
+build a self-contained browser page to compare every corpus diagram side by side:
+
+```sh
+cargo run -p compliance -- --corpus corpus/flowchart/mermaid --artifacts artifacts/mermaid
+python3 tools/build_viewer.py            # writes artifacts/viewer.html
+```
+
+Open `artifacts/viewer.html` in any browser (no server needed — everything is
+inlined). Features:
+
+- **mermaid (oracle) vs carcimaid** rendered side by side, with our pane given a
+  mermaid-like theme so unstyled geometry is legible.
+- **Next/Prev** buttons and <kbd>←</kbd>/<kbd>→</kbd> keys; filter (diffs/passes/
+  errors), sort (by id / most / fewest diffs), and a fit-width toggle.
+- Each view shows the **case ID** (with a copy button) — use it to give feedback
+  on a specific diagram. A per-case notes box saves to `localStorage`, and
+  **export feedback** downloads all notes as JSON.
+- The source `.mmd` and the structural diff are shown below the renders.
+
 ## The oracle (mermaid-cli)
 
 The harness shells out to the official mermaid CLI via its Docker image so the
