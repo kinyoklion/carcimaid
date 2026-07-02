@@ -98,15 +98,8 @@ HTML = """<!doctype html>
                 background-size:16px 16px; background-position:0 0,8px 8px; }
   .fit .pane .body svg { max-width:100%; height:auto; }
   .missing { color:var(--err); padding:20px; }
-  /* Our SVG emits geometry without theme styles; give the ours pane a
-     mermaid-like default so shapes/edges/labels are legible for comparison. */
-  #ours svg .label-container, #ours svg rect, #ours svg polygon, #ours svg circle
-      { fill:#ECECFF; stroke:#9370DB; stroke-width:1px; }
-  #ours svg .cluster rect { fill:#ffffde; stroke:#aaaa33; }
-  #ours svg text, #ours svg .nodeLabel { fill:#333; }
-  #ours svg .edgePaths path, #ours svg path.flowchart-link { fill:none; stroke:#333; stroke-width:1.5px; }
-  #ours svg .arrowMarkerPath { fill:#333; stroke:#333; }
-  #ours svg rect.background { fill:transparent; stroke:none; }
+  /* Both SVGs now carry their own <style> (oracle's is mermaid's; ours is a
+     focused mirror), so the panes are themed by the SVG content itself. */
   .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
   pre { margin:0; padding:12px; background:#fff; border:1px solid var(--line); border-radius:8px;
         overflow:auto; max-height:30vh; font:12px/1.4 ui-monospace,Menlo,monospace; white-space:pre-wrap; }

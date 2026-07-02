@@ -64,10 +64,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         h = h,
     );
 
-    // 1. <style> — mermaid emits a large CSS block here; we emit an empty one
-    //    to keep the child structure aligned. The comparator ignores <style>
-    //    text content.
-    s.push_str("<style></style>");
+    // 1. <style> — a focused theme mirroring mermaid's defaults. Crucially it
+    //    centres node labels (`text-anchor:middle`) and gives edge labels a
+    //    background; without it our labels are left-anchored (off-centre). The
+    //    comparator ignores <style> text, so this adds no structural diff.
+    s.push_str(&style_block());
 
     // 2. wrapper <g> with markers + g.root
     s.push_str("<g>");
@@ -116,6 +117,27 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 
     s.push_str("</svg>");
     s
+}
+
+/// A focused stylesheet mirroring mermaid's default theme for the elements we
+/// emit. Scoped to the diagram id so it doesn't leak. Mirrors mermaid's own
+/// approach of embedding node/edge/label styling (which is why label centering
+/// lives here, not in a `text-anchor` attribute).
+fn style_block() -> String {
+    const CSS: &str = concat!(
+        "SVGID{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#333;}",
+        "SVGID .label{font-family:\"trebuchet ms\",verdana,arial,sans-serif;color:#333;}",
+        "SVGID .label text{fill:#333;}",
+        "SVGID .node .label text{text-anchor:middle;}",
+        "SVGID .label-container{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
+        "SVGID .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}",
+        "SVGID .flowchart-link{stroke:#333;fill:none;}",
+        "SVGID .edgeLabel{background-color:rgba(232,232,232,0.8);}",
+        "SVGID .edgeLabel rect{opacity:0.5;fill:rgba(232,232,232,0.8);}",
+        "SVGID .marker{fill:#333;stroke:#333;}",
+        "SVGID .arrowMarkerPath{fill:#333;stroke:#333;}",
+    );
+    format!("<style>{}</style>", CSS.replace("SVGID", &format!("#{ID}")))
 }
 
 fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
