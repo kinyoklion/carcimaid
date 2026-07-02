@@ -92,7 +92,10 @@ pub struct Difference {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiffKind {
     TagMismatch { reference: String, candidate: String },
-    ChildCountMismatch { reference: usize, candidate: usize },
+    /// A child present in the reference has no counterpart in the candidate.
+    ElementMissing { key: String },
+    /// A child present in the candidate has no counterpart in the reference.
+    ElementExtra { key: String },
     TextMismatch { reference: String, candidate: String },
     AttrMissing { name: String, reference: String },
     AttrExtra { name: String, candidate: String },
@@ -183,18 +186,83 @@ fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>
             },
         });
     }
-    if r.children.len() != c.children.len() {
-        out.push(Difference {
-            path: path.to_string(),
-            kind: DiffKind::ChildCountMismatch {
-                reference: r.children.len(),
-                candidate: c.children.len(),
-            },
-        });
+    diff_children(r, c, path, opts, out);
+}
+
+/// A matching key for aligning children across the two trees: tag + first class
+/// token + id. Deliberately excludes text so that a leaf whose text differs is
+/// still *matched* (and reported as a `TextMismatch`) rather than shown as a
+/// missing/extra pair.
+fn child_key(el: &El) -> String {
+    let class = el.attrs.get("class").and_then(|c| c.split_whitespace().next()).unwrap_or("");
+    let id = el.attrs.get("id").map(|i| strip_id_counter(i)).unwrap_or("");
+    format!("{}|{}|{}", el.tag, class, id)
+}
+
+/// Strip a trailing `-N`/`_N` insertion counter from an id. mermaid suffixes
+/// node ids with a per-node counter (`…-flowchart-C-2`) that we don't reproduce
+/// exactly, so it must not defeat key matching.
+fn strip_id_counter(id: &str) -> &str {
+    if let Some(pos) = id.rfind(['-', '_']) {
+        if pos + 1 < id.len() && id[pos + 1..].bytes().all(|b| b.is_ascii_digit()) {
+            return &id[..pos];
+        }
     }
-    for (i, (rc, cc)) in r.children.iter().zip(c.children.iter()).enumerate() {
-        let child_path = format!("{path}/{}[{i}]", rc.tag);
-        diff_el(rc, cc, &child_path, opts, out);
+    id
+}
+
+/// Align children by key using a longest-common-subsequence, so an inserted or
+/// omitted child is reported precisely instead of shifting every later child
+/// out of alignment (which would mask real per-element differences).
+fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>) {
+    let rk: Vec<String> = r.children.iter().map(child_key).collect();
+    let ck: Vec<String> = c.children.iter().map(child_key).collect();
+    let (n, m) = (rk.len(), ck.len());
+
+    // LCS length table over the key sequences.
+    let mut dp = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if rk[i] == ck[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+
+    let missing = |out: &mut Vec<Difference>, k: &str| {
+        out.push(Difference { path: path.to_string(), kind: DiffKind::ElementMissing { key: k.to_string() } });
+    };
+    let extra = |out: &mut Vec<Difference>, k: &str| {
+        out.push(Difference { path: path.to_string(), kind: DiffKind::ElementExtra { key: k.to_string() } });
+    };
+
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if out.len() >= opts.max_differences {
+            return;
+        }
+        if rk[i] == ck[j] {
+            let child_path = format!("{path}/{}[{i}]", r.children[i].tag);
+            diff_el(&r.children[i], &c.children[j], &child_path, opts, out);
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            missing(out, &rk[i]);
+            i += 1;
+        } else {
+            extra(out, &ck[j]);
+            j += 1;
+        }
+    }
+    while i < n && out.len() < opts.max_differences {
+        missing(out, &rk[i]);
+        i += 1;
+    }
+    while j < m && out.len() < opts.max_differences {
+        extra(out, &ck[j]);
+        j += 1;
     }
 }
 
@@ -348,6 +416,19 @@ mod tests {
         let b = parse(r#"<svg><text>World</text></svg>"#).unwrap();
         let report = compare(&a, &b, &Options::default());
         assert!(matches!(report.differences[0].kind, DiffKind::TextMismatch { .. }));
+    }
+
+    #[test]
+    fn inserted_child_does_not_cascade() {
+        // Reference has an extra <title> before the shared <g>; the <g> and its
+        // contents must still align (no cascade of tag mismatches).
+        let a = parse(r#"<svg><title>t</title><g><rect x="1"/></g></svg>"#).unwrap();
+        let b = parse(r#"<svg><g><rect x="1"/></g></svg>"#).unwrap();
+        let report = compare(&a, &b, &Options::default());
+        let kinds: Vec<_> = report.differences.iter().map(|d| &d.kind).collect();
+        // Exactly one missing element (the title); the <g>/<rect> match cleanly.
+        assert_eq!(report.differences.len(), 1, "{:?}", report.differences);
+        assert!(matches!(kinds[0], DiffKind::ElementMissing { .. }));
     }
 
     #[test]
