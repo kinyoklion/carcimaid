@@ -344,13 +344,31 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
     let eid = edge_id(edge, nodes);
     match &edge.label {
         Some(label) => {
-            // Labelled: g.edgeLabel[transform] > g.label[data-id] > g >
-            //           (rect.background + text).
+            // Labelled: g.edgeLabel positioned at the dagre-computed label
+            // centre > g.label[data-id] (offset up half a line) > g >
+            //           (sized rect.background + text).
+            let (lx, ly) = edge.label_pos.unwrap_or((0.0, 0.0));
+            let lines = crate::text::wrap_label(label, crate::text::WRAP_WIDTH, 16.0);
+            let bg_w = lines
+                .iter()
+                .map(|l| crate::text::line_width(l, 16.0))
+                .fold(0.0_f64, f64::max)
+                + 4.0;
+            let bg_h = 23.0 + (lines.len().max(1) as f64 - 1.0) * LINE_SPACING;
             let _ = write!(
                 s,
-                r#"<g class="edgeLabel"><g class="label" data-id="{eid}" transform="translate(0, -10.5)"><g>"#,
+                r#"<g class="edgeLabel" transform="translate({}, {})"><g class="label" data-id="{eid}" transform="translate(0, {})"><g>"#,
+                round(lx),
+                round(ly),
+                round(-bg_h / 2.0 + 1.0), // -10.5 for a single 23px line
             );
-            s.push_str(r#"<rect class="background"/>"#);
+            let _ = write!(
+                s,
+                r#"<rect class="background" x="{}" y="-1" width="{}" height="{}"/>"#,
+                round(-bg_w / 2.0),
+                round(bg_w),
+                round(bg_h),
+            );
             render_text(s, Some(label), true);
             s.push_str("</g></g></g>");
         }

@@ -66,6 +66,8 @@ pub struct PlacedEdge {
     pub points: Vec<(f64, f64)>,
     /// Whether the edge has an arrowhead at the `to` end.
     pub arrow: bool,
+    /// Dagre-computed label position (center), if the edge has a label.
+    pub label_pos: Option<(f64, f64)>,
 }
 
 // --- mermaid layout parameters (its flowchart defaults). ---
@@ -250,17 +252,22 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let points = g
-                .edge(&e.from.to_string(), &e.to.to_string(), Some(&i.to_string()))
+            let el = g.edge(&e.from.to_string(), &e.to.to_string(), Some(&i.to_string()));
+            let points = el
                 .map(|el| el.points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>())
                 .filter(|p| !p.is_empty())
                 .unwrap_or_else(|| vec![(nodes[e.from].cx, nodes[e.from].cy), (nodes[e.to].cx, nodes[e.to].cy)]);
+            // mermaid places the edge label at the midpoint of the edge path by
+            // arc length (not at dagre's reserved label slot, which sits off the
+            // path).
+            let label_pos = e.label.as_ref().map(|_| midpoint_by_length(&points));
             PlacedEdge {
                 from: e.from,
                 to: e.to,
                 label: e.label.clone(),
                 points,
                 arrow: e.arrow,
+                label_pos,
             }
         })
         .collect();
@@ -301,6 +308,28 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
 /// which are plain indices).
 fn cluster_key(i: usize) -> String {
     format!("cluster{i}")
+}
+
+/// The point at 50% of a polyline's arc length — where mermaid places edge labels.
+fn midpoint_by_length(points: &[(f64, f64)]) -> (f64, f64) {
+    match points {
+        [] => (0.0, 0.0),
+        [p] => *p,
+        _ => {
+            let seg = |a: (f64, f64), b: (f64, f64)| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+            let total: f64 = points.windows(2).map(|w| seg(w[0], w[1])).sum();
+            let mut remaining = total / 2.0;
+            for w in points.windows(2) {
+                let d = seg(w[0], w[1]);
+                if d >= remaining {
+                    let t = if d > 0.0 { remaining / d } else { 0.0 };
+                    return (w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t);
+                }
+                remaining -= d;
+            }
+            *points.last().unwrap()
+        }
+    }
 }
 
 #[cfg(test)]
