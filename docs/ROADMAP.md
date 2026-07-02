@@ -6,10 +6,18 @@ Run it yourself with `cargo run -p compliance -- --corpus corpus/flowchart/merma
 
 ## Baseline snapshot (flowchart corpus)
 
-After text metrics + dagre + subgraphs + shapes + wrapping + directives (a50bb49):
+Latest (cc6ce70):
 
-- 199 diagrams, 196 compared (3 are unrenderable by the mermaid CLI itself).
-- **Exact passes: 14** (was 6). ≤5 diffs: 30; ≤10 diffs: 48.
+- 199 diagrams, 196 compared (3 unrenderable by the mermaid CLI itself).
+- **Exact passes: 19.** Of the ~177 non-passing, **13 explicitly request the ELK
+  layout engine** (`config: layout: elk`) — a different engine we don't
+  implement, so effectively out of scope. Achievable denominator ≈ 183.
+- The single-fix passes are harvested (no diagrams sit at 1-2 diffs); remaining
+  cases each need multiple fixes.
+
+Earlier milestone (a50bb49):
+
+- Exact passes 14; ≤5 diffs: 30; ≤10 diffs: 48.
 - Geometry is correct (node coords, edge curves, viewBox, clusters,
   rhombus/circle); labels wrap into per-word `tspan` rows; `classDef`/`class`/
   `style`/`linkStyle`/`click` directives and `:::class` suffixes no longer
@@ -80,4 +88,9 @@ is a useful secondary. Judge features by passes + near-passes, not total diffs.
 - **`g` vs `rect` (81)** — largest tag mismatch; needs investigation (likely
   subgraph node emission ordering / nested clusters).
 - **`<br>` breaks + markdown** (`**bold**`) labels.
+- **ELK layout** (13 diagrams request `layout: elk`) — a separate engine
+  (elkjs); out of scope unless an ELK port is undertaken. Consider marking these
+  in the harness so pass-rate reflects the dagre-achievable corpus.
 - **Metric**: raw diff-count is noisy; consider a matched-element ratio.
+- **~1px width drift**: our advance-width sum runs ~0.04px/char under mermaid's
+  browser `getBBox`; caps long-label passes. Fundamental metric limit.
