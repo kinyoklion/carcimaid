@@ -29,9 +29,25 @@ pub fn parse(source: &str) -> Result<Flowchart> {
     // Stack of enclosing subgraph indices (for nesting). The top is the current
     // subgraph that newly-defined nodes are assigned to.
     let mut stack: Vec<usize> = Vec::new();
+    // Inside a multi-line `accDescr { … }` accessibility block.
+    let mut in_acc_block = false;
 
     for line in lines {
+        if in_acc_block {
+            if line.contains('}') {
+                in_acc_block = false;
+            }
+            continue;
+        }
         if line.starts_with("%%") {
+            continue;
+        }
+        // Accessibility metadata (`accTitle: …`, `accDescr: …`, or a multi-line
+        // `accDescr { … }`) renders as <title>/<desc>, never as a node — skip it.
+        if line.starts_with("accTitle") || line.starts_with("accDescr") {
+            if line.starts_with("accDescr") && line.contains('{') && !line.contains('}') {
+                in_acc_block = true;
+            }
             continue;
         }
         for stmt in line.split(';') {
@@ -315,9 +331,71 @@ fn strip_class(endpoint: &str) -> &str {
     endpoint
 }
 
+/// Map a mermaid v11 shape name/alias to a [`NodeShape`]. Unknown shapes fall
+/// back to a rectangle. (Shapes we don't model exactly reuse the closest one.)
+fn map_shape(name: &str) -> NodeShape {
+    match name {
+        "circle" | "circ" => NodeShape::Circle,
+        "rounded" | "event" => NodeShape::RoundedRectangle,
+        "stadium" | "pill" | "terminal" => NodeShape::Stadium,
+        "diam" | "diamond" | "decision" | "question" => NodeShape::Rhombus,
+        "hex" | "hexagon" | "prepare" => NodeShape::Hexagon,
+        "subproc" | "subprocess" | "subroutine" | "framed-rectangle" | "fr-rect" => {
+            NodeShape::Subroutine
+        }
+        "cyl" | "cylinder" | "database" | "db" | "datastore" | "das" | "disk" => {
+            NodeShape::Cylinder
+        }
+        "lean-r" | "lean-right" | "in-out" | "lin-r" => NodeShape::Parallelogram,
+        "lean-l" | "lean-left" | "out-in" | "lin-l" => NodeShape::LeanLeft,
+        "trap-b" | "trapezoid" | "trapezoid-bottom" | "manual" => NodeShape::Trapezoid,
+        "trap-t" | "inv-trapezoid" | "trapezoid-top" | "priority" => NodeShape::InvTrapezoid,
+        _ => NodeShape::Rectangle, // rect/rectangle/box/proc/process/… and unknowns
+    }
+}
+
+/// Parse the body of a v11 `@{ … }` node-metadata block, e.g.
+/// `shape: datastore, label: "Datastore"`, into (shape, optional label).
+fn parse_at_metadata(inner: &str) -> (NodeShape, Option<String>) {
+    let mut shape = NodeShape::Rectangle;
+    let mut label = None;
+    let mut cur = String::new();
+    let mut in_quote = false;
+    let mut parts = Vec::new();
+    for c in inner.chars() {
+        match c {
+            '"' => {
+                in_quote = !in_quote;
+                cur.push(c);
+            }
+            ',' if !in_quote => parts.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    parts.push(cur);
+    for part in parts {
+        if let Some((k, v)) = part.split_once(':') {
+            let v = unquote(v.trim());
+            match k.trim() {
+                "shape" => shape = map_shape(v),
+                "label" | "title" => label = Some(v.to_string()),
+                _ => {}
+            }
+        }
+    }
+    (shape, label)
+}
+
 /// Parse an endpoint token into (id, shape, optional label).
 fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>) {
     let endpoint = strip_class(endpoint.trim());
+    // mermaid v11 `id@{ shape: …, label: "…" }` node-metadata syntax.
+    if let Some(at) = endpoint.find("@{") {
+        let id = endpoint[..at].trim().to_string();
+        let inner = endpoint[at + 2..].trim().strip_suffix('}').unwrap_or(&endpoint[at + 2..]);
+        let (shape, label) = parse_at_metadata(inner);
+        return (id, shape, label);
+    }
     // Find where the shape bracket (if any) begins.
     let open = endpoint.find(['[', '(', '{']);
     let Some(open) = open else {
@@ -393,6 +471,28 @@ mod tests {
         assert_eq!(chart.nodes.len(), 3);
         assert_eq!(chart.edges.len(), 2);
         assert_eq!(chart.edges[1].label.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn skips_accessibility_metadata() {
+        let chart = parse(
+            "flowchart LR\n accTitle: A title\n accDescr: A description\n A --> B",
+        )
+        .unwrap();
+        let ids: Vec<_> = chart.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["A", "B"]);
+    }
+
+    #[test]
+    fn parses_v11_at_metadata_shape_and_label() {
+        let chart = parse(
+            "flowchart LR\n DataStore@{shape: datastore, label: \"Datastore\"} --> B@{shape: circle}",
+        )
+        .unwrap();
+        assert_eq!(chart.nodes[0].id, "DataStore");
+        assert_eq!(chart.nodes[0].label, "Datastore");
+        assert_eq!(chart.nodes[0].shape, NodeShape::Cylinder);
+        assert_eq!(chart.nodes[1].shape, NodeShape::Circle);
     }
 
     #[test]
