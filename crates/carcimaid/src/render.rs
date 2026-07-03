@@ -295,7 +295,7 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
         round(label_x),
         round(y),
     );
-    s.push_str(r#"<rect class="background"/>"#);
+    s.push_str(r#"<rect class="background" style="stroke: none"/>"#);
     render_text(s, Some(&cluster.title), false, "");
     s.push_str("</g></g></g>");
 }
@@ -320,7 +320,7 @@ fn render_node(s: &mut String, node: &PlacedNode) {
         r#"<g class="label" transform="translate(0, {})"><rect/><g>"#,
         round(-block_h / 2.0),
     );
-    s.push_str(r#"<rect class="background"/>"#);
+    s.push_str(r#"<rect class="background" style="stroke: none"/>"#);
     render_text(s, Some(&node.label), false, &node.label_style);
     s.push_str("</g></g></g>");
 }
@@ -654,7 +654,7 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
                 r#"<g class="edgeLabel"><g class="label" data-id="{eid}" transform="translate(0, 0)">"#,
             );
             render_text(s, None, true, "");
-            s.push_str(r#"</g></g><g><rect class="background"/></g>"#);
+            s.push_str(r#"</g></g><g><rect class="background" style="stroke: none"/></g>"#);
         }
     }
 }

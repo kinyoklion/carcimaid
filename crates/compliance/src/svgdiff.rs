@@ -135,12 +135,12 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             numeric_tolerance: 1.0,
-            // id/class/style are non-deterministic or cosmetic; data-points is a
-            // base64 blob duplicating the path geometry already checked via `d`.
+            // id/class are non-deterministic or cosmetic; data-points is a base64
+            // blob duplicating the path geometry already checked via `d`. `style`
+            // is compared, but as a normalized property set (see diff_attrs).
             ignore_attrs: vec![
                 "id".into(),
                 "class".into(),
-                "style".into(),
                 "data-points".into(),
             ],
             max_differences: 50,
@@ -272,6 +272,22 @@ fn diff_attrs(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Differen
         if ignored(name) {
             continue;
         }
+        // `style` is compared as a normalized property set, so an empty style and
+        // an absent one are equal and property order / duplicates don't matter.
+        if name == "style" {
+            let cv = c.attrs.get(name).map(String::as_str).unwrap_or("");
+            if !style_eq(rv, cv) {
+                out.push(Difference {
+                    path: path.to_string(),
+                    kind: DiffKind::AttrValueMismatch {
+                        name: name.clone(),
+                        reference: rv.clone(),
+                        candidate: cv.to_string(),
+                    },
+                });
+            }
+            continue;
+        }
         match c.attrs.get(name) {
             None => out.push(Difference {
                 path: path.to_string(),
@@ -292,16 +308,47 @@ fn diff_attrs(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Differen
         }
     }
     for (name, cv) in &c.attrs {
-        if !ignored(name) && !r.attrs.contains_key(name) {
-            out.push(Difference {
-                path: path.to_string(),
-                kind: DiffKind::AttrExtra {
-                    name: name.clone(),
-                    candidate: cv.clone(),
-                },
-            });
+        if ignored(name) || r.attrs.contains_key(name) {
+            continue;
         }
+        // A candidate-only `style` matters only if it carries real properties.
+        if name == "style" {
+            if !style_eq("", cv) {
+                out.push(Difference {
+                    path: path.to_string(),
+                    kind: DiffKind::AttrExtra { name: name.clone(), candidate: cv.clone() },
+                });
+            }
+            continue;
+        }
+        out.push(Difference {
+            path: path.to_string(),
+            kind: DiffKind::AttrExtra { name: name.clone(), candidate: cv.clone() },
+        });
     }
+}
+
+/// Compare two `style` attribute values as property sets: split into `k:v`
+/// declarations, drop `!important`/whitespace/duplicates, and compare
+/// order-independently. Handles mermaid's duplicated (`;;;`) declarations and
+/// our `!important` formatting uniformly.
+fn style_eq(a: &str, b: &str) -> bool {
+    normalize_style(a) == normalize_style(b)
+}
+
+fn normalize_style(s: &str) -> Vec<String> {
+    let mut v: Vec<String> = s
+        .split(';')
+        .map(|d| d.replace("!important", ""))
+        .map(|d| match d.split_once(':') {
+            Some((k, val)) => format!("{}:{}", k.trim(), val.trim()),
+            None => d.trim().to_string(),
+        })
+        .filter(|d| !d.is_empty() && d != ":")
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Attribute equality with numeric tolerance: if both values parse as the same
