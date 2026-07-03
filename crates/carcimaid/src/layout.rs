@@ -35,6 +35,11 @@ pub struct LaidOutFlowchart {
     pub title: Option<String>,
     pub acc_title: Option<String>,
     pub acc_descr: Option<String>,
+    /// Absolute render offset of each subgraph's scope (indexed by subgraph).
+    /// Separately-laid-out subgraphs render inside a translated `g.root`; node
+    /// coordinates are absolute, so the renderer subtracts this to get the
+    /// group-relative coordinates mermaid emits. `(0,0)` for inline subgraphs.
+    pub scope_offsets: Vec<(f64, f64)>,
 }
 
 /// A subgraph cluster with concrete geometry (its bounding box).
@@ -54,6 +59,9 @@ pub struct PlacedCluster {
     pub extracted: bool,
     /// The enclosing extracted subgraph (render scope), or `None` for the root.
     pub home: Option<usize>,
+    /// mermaid render order: reverse of definition order among siblings, parents
+    /// before children (a children-reversed DFS of the subgraph tree).
+    pub order: usize,
 }
 
 /// A node with a center position and a box size.
@@ -179,13 +187,6 @@ fn rank_dir(dir: Direction) -> RankDir {
 // already matches mermaid. This mirrors mermaid's dagre-wrapper `extractor` +
 // `recursiveRender`.
 const SUBGRAPH_RANKSEP_INC: f64 = 25.0;
-/// Cluster padding perpendicular to the flow, per side ((nodesep + edgesep)/2).
-const CLUSTER_CROSS_PAD: f64 = (NODE_SEP + EDGE_SEP) / 2.0;
-
-fn is_horizontal(d: Direction) -> bool {
-    matches!(d, Direction::LeftRight | Direction::RightLeft)
-}
-
 /// Direction a separately-laid-out subgraph uses: explicit, else transposed
 /// from the parent (`TB -> LR`, anything else -> `TB`).
 fn subgraph_dir(sg: &crate::ir::Subgraph, parent: Direction) -> Direction {
@@ -227,6 +228,26 @@ fn home_node(chart: &Flowchart, ext: &[bool], n: usize) -> Option<usize> {
     node_ancestors(chart, n).into_iter().find(|&sg| ext[sg])
 }
 
+/// mermaid's cluster render order: a DFS of the subgraph tree visiting siblings
+/// in reverse definition order, parents before children. Returns a rank per
+/// subgraph (lower renders first).
+fn render_order(chart: &Flowchart) -> Vec<usize> {
+    fn dfs(chart: &Flowchart, parent: Option<usize>, rank: &mut Vec<usize>, next: &mut usize) {
+        let mut children: Vec<usize> =
+            (0..chart.subgraphs.len()).filter(|&s| chart.subgraphs[s].parent == parent).collect();
+        children.reverse();
+        for c in children {
+            rank[c] = *next;
+            *next += 1;
+            dfs(chart, Some(c), rank, next);
+        }
+    }
+    let mut rank = vec![0usize; chart.subgraphs.len()];
+    let mut next = 0;
+    dfs(chart, None, &mut rank, &mut next);
+    rank
+}
+
 /// Deepest extracted subgraph strictly containing subgraph `s`, or `None`.
 fn home_sg(chart: &Flowchart, ext: &[bool], s: usize) -> Option<usize> {
     let mut cur = chart.subgraphs[s].parent;
@@ -240,21 +261,26 @@ fn home_sg(chart: &Flowchart, ext: &[bool], s: usize) -> Option<usize> {
 }
 
 /// Geometry of one layout scope (the root or a separately-laid-out subgraph), in
-/// its own dagre frame; `minx/miny/w/h` bound its content so a parent can place it.
+/// its own dagre frame. For an extracted subgraph, `own_*` is its cluster box
+/// (from the compound layout) — the size/centre a parent uses to place it.
 #[derive(Default)]
 struct Scope {
     nodes: Vec<(usize, f64, f64)>,
     clusters: Vec<(usize, f64, f64, f64, f64)>,
     edges: Vec<(usize, Vec<(f64, f64)>)>,
-    minx: f64,
-    miny: f64,
-    w: f64,
-    h: f64,
+    own_cx: f64,
+    own_cy: f64,
+    own_w: f64,
+    own_h: f64,
 }
 
-/// Lay out one scope: its direct nodes, inline (non-extracted) subgraphs as
-/// compound clusters, and extracted child subgraphs as pre-sized collapsed
-/// nodes whose contents are then offset into place.
+/// Lay out one scope with dagre. An extracted subgraph is laid out as a compound
+/// graph *with itself as the enclosing cluster* (mermaid re-inserts the subgraph
+/// into its own sub-graph), so dagre yields the exact cluster box and the +25
+/// ranksep border spacing. Inline (non-extracted) child subgraphs are ordinary
+/// compound clusters; extracted child subgraphs are collapsed to a node sized to
+/// their own cluster box, then their contents merged back in at that position.
+/// `offsets[s]` records each extracted child's placement offset in this frame.
 fn layout_scope(
     chart: &Flowchart,
     sizes: &[(f64, f64)],
@@ -262,23 +288,16 @@ fn layout_scope(
     owner: Option<usize>,
     dir: Direction,
     ranksep: f64,
+    offsets: &mut Vec<(f64, f64)>,
 ) -> Scope {
     use std::collections::HashMap;
-    // Recursively lay out extracted child subgraphs to get their collapsed sizes.
+    // Recursively lay out extracted child subgraphs; their own cluster box is the
+    // collapsed-node size in this scope.
     let mut sub: HashMap<usize, Scope> = HashMap::new();
-    let mut collapsed: HashMap<usize, (f64, f64)> = HashMap::new();
     for s in 0..chart.subgraphs.len() {
         if home_sg(chart, ext, s) == owner && ext[s] {
             let sdir = subgraph_dir(&chart.subgraphs[s], dir);
-            let child_ranksep = ranksep + SUBGRAPH_RANKSEP_INC;
-            let sc = layout_scope(chart, sizes, ext, Some(s), sdir, child_ranksep);
-            let rank_pad = child_ranksep / 2.0;
-            let (pad_x, pad_y) = if is_horizontal(sdir) {
-                (rank_pad, CLUSTER_CROSS_PAD)
-            } else {
-                (CLUSTER_CROSS_PAD, rank_pad)
-            };
-            collapsed.insert(s, (sc.w + 2.0 * pad_x, sc.h + 2.0 * pad_y));
+            let sc = layout_scope(chart, sizes, ext, Some(s), sdir, ranksep + SUBGRAPH_RANKSEP_INC, offsets);
             sub.insert(s, sc);
         }
     }
@@ -286,6 +305,10 @@ fn layout_scope(
     let mut g: Graph<NodeLabel, EdgeLabel> =
         Graph::with_options(GraphOptions { directed: true, multigraph: true, compound: true });
 
+    // An extracted subgraph is its own enclosing cluster in this layout.
+    if let Some(o) = owner {
+        g.set_node(format!("c{o}"), Some(NodeLabel::default()));
+    }
     for n in 0..chart.nodes.len() {
         if home_node(chart, ext, n) == owner {
             let (w, h) = sizes[n];
@@ -297,15 +320,16 @@ fn layout_scope(
             continue;
         }
         if ext[s] {
-            let (cw, ch) = collapsed[&s];
-            g.set_node(format!("s{s}"), Some(NodeLabel { width: cw, height: ch, ..Default::default() }));
+            let c = &sub[&s];
+            g.set_node(format!("s{s}"), Some(NodeLabel { width: c.own_w, height: c.own_h, ..Default::default() }));
         } else {
             g.set_node(format!("c{s}"), Some(NodeLabel::default()));
         }
     }
-    // Compound parent: a member's enclosing subgraph, when that is an inline
-    // (non-extracted) member of this same scope.
+    // Compound parent of a member: its enclosing subgraph when that is this
+    // scope's own cluster, or an inline sub-cluster of this scope.
     let parent_key = |parent: Option<usize>| match parent {
+        Some(p) if Some(p) == owner => Some(format!("c{p}")),
         Some(p) if home_sg(chart, ext, p) == owner && !ext[p] => Some(format!("c{p}")),
         _ => None,
     };
@@ -369,19 +393,18 @@ fn layout_scope(
             let node = g.node(&format!("s{s}"));
             let px = node.and_then(|x| x.x).unwrap_or(0.0);
             let py = node.and_then(|x| x.y).unwrap_or(0.0);
-            let (cw, ch) = collapsed[&s];
-            out.clusters.push((s, px, py, cw, ch));
-            // Place the subgraph's contents: centre its content bbox on (px, py).
-            let sc = &sub[&s];
-            let ox = px - sc.w / 2.0 - sc.minx;
-            let oy = py - sc.h / 2.0 - sc.miny;
-            for &(ni, x, y) in &sc.nodes {
+            // Merge the child's contents in this frame, aligning its own cluster
+            // centre to where dagre placed the collapsed node.
+            let c = &sub[&s];
+            let (ox, oy) = (px - c.own_cx, py - c.own_cy);
+            offsets[s] = (ox, oy);
+            for &(ni, x, y) in &c.nodes {
                 out.nodes.push((ni, x + ox, y + oy));
             }
-            for &(s2, cx, cy, w, h) in &sc.clusters {
+            for &(s2, cx, cy, w, h) in &c.clusters {
                 out.clusters.push((s2, cx + ox, cy + oy, w, h));
             }
-            for (e2, pts) in &sc.edges {
+            for (e2, pts) in &c.edges {
                 out.edges.push((*e2, pts.iter().map(|&(x, y)| (x + ox, y + oy)).collect()));
             }
         } else {
@@ -406,35 +429,16 @@ fn layout_scope(
         }
     }
 
-    let (mut mnx, mut mny, mut mxx, mut mxy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for &(n, cx, cy) in &out.nodes {
-        let (w, h) = sizes[n];
-        mnx = mnx.min(cx - w / 2.0);
-        mny = mny.min(cy - h / 2.0);
-        mxx = mxx.max(cx + w / 2.0);
-        mxy = mxy.max(cy + h / 2.0);
+    // For an extracted subgraph, record its own cluster box (dagre gives it
+    // directly) and emit its rect.
+    if let Some(o) = owner {
+        let node = g.node(&format!("c{o}"));
+        out.own_cx = node.and_then(|x| x.x).unwrap_or(0.0);
+        out.own_cy = node.and_then(|x| x.y).unwrap_or(0.0);
+        out.own_w = node.map(|x| x.width).unwrap_or(0.0);
+        out.own_h = node.map(|x| x.height).unwrap_or(0.0);
+        out.clusters.push((o, out.own_cx, out.own_cy, out.own_w, out.own_h));
     }
-    for &(_, cx, cy, w, h) in &out.clusters {
-        mnx = mnx.min(cx - w / 2.0);
-        mny = mny.min(cy - h / 2.0);
-        mxx = mxx.max(cx + w / 2.0);
-        mxy = mxy.max(cy + h / 2.0);
-    }
-    for (_, pts) in &out.edges {
-        for &(x, y) in pts {
-            mnx = mnx.min(x);
-            mny = mny.min(y);
-            mxx = mxx.max(x);
-            mxy = mxy.max(y);
-        }
-    }
-    if mnx > mxx {
-        (mnx, mny, mxx, mxy) = (0.0, 0.0, 0.0, 0.0);
-    }
-    out.minx = mnx;
-    out.miny = mny;
-    out.w = mxx - mnx;
-    out.h = mxy - mny;
     out
 }
 
@@ -459,11 +463,29 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             title: chart.title.clone(),
             acc_title: chart.acc_title.clone(),
             acc_descr: chart.acc_descr.clone(),
+            scope_offsets: Vec::new(),
         };
     }
 
     let ext = compute_extracted(chart);
-    let scope = layout_scope(chart, &sizes, &ext, None, chart.direction, RANK_SEP);
+    let order = render_order(chart);
+    // Per-subgraph render offset (relative to the parent scope), filled in by
+    // layout, then composed to absolute offsets below.
+    let mut offsets = vec![(0.0, 0.0); chart.subgraphs.len()];
+    let scope = layout_scope(chart, &sizes, &ext, None, chart.direction, RANK_SEP, &mut offsets);
+    // Compose parent-relative offsets into absolute scope offsets: a subgraph's
+    // absolute offset is its own relative offset plus its parent scope's.
+    let mut scope_offsets = vec![(0.0, 0.0); chart.subgraphs.len()];
+    for s in 0..chart.subgraphs.len() {
+        let mut acc = offsets[s];
+        let mut cur = home_sg(chart, &ext, s);
+        while let Some(p) = cur {
+            acc.0 += offsets[p].0;
+            acc.1 += offsets[p].1;
+            cur = home_sg(chart, &ext, p);
+        }
+        scope_offsets[s] = acc;
+    }
 
     let nodes: Vec<PlacedNode> = scope
         .nodes
@@ -519,6 +541,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             sg_index: s,
             extracted: ext[s],
             home: home_sg(chart, &ext, s),
+            order: order[s],
         })
         .collect();
 
@@ -564,6 +587,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         title: chart.title.clone(),
         acc_title: chart.acc_title.clone(),
         acc_descr: chart.acc_descr.clone(),
+        scope_offsets,
     }
 }
 

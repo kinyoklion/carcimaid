@@ -115,9 +115,44 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     s.push_str(&style_block());
 
     // 2. wrapper <g> with markers + the (possibly nested) g.root tree.
+    //    Extracted subgraphs render inside a translated g.root, so shift each
+    //    element's absolute coordinates into its scope's local frame; the group
+    //    transform re-applies the offset (matching mermaid's DOM exactly).
+    let off = |h: Option<usize>| h.map(|s| chart.scope_offsets[s]).unwrap_or((0.0, 0.0));
+    let rel_nodes: Vec<PlacedNode> = chart
+        .nodes
+        .iter()
+        .map(|n| {
+            let (dx, dy) = off(n.home);
+            PlacedNode { cx: n.cx - dx, cy: n.cy - dy, ..n.clone() }
+        })
+        .collect();
+    let rel_edges: Vec<PlacedEdge> = chart
+        .edges
+        .iter()
+        .map(|e| {
+            let (dx, dy) = off(e.home);
+            PlacedEdge {
+                points: e.points.iter().map(|&(x, y)| (x - dx, y - dy)).collect(),
+                label_pos: e.label_pos.map(|(x, y)| (x - dx, y - dy)),
+                ..e.clone()
+            }
+        })
+        .collect();
+    let mut rel_clusters: Vec<PlacedCluster> = chart
+        .clusters
+        .iter()
+        .map(|c| {
+            let (dx, dy) = off(if c.extracted { Some(c.sg_index) } else { c.home });
+            PlacedCluster { cx: c.cx - dx, cy: c.cy - dy, ..c.clone() }
+        })
+        .collect();
+    // Emit clusters (and nested subgraph groups) in mermaid's render order.
+    rel_clusters.sort_by_key(|c| c.order);
+
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
-    render_scope(&mut s, chart, None);
+    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0));
     s.push_str("</g>"); // close wrapper g
 
     // 3. drop-shadow filter defs (verbatim mermaid).
@@ -173,17 +208,31 @@ fn style_block() -> String {
 /// `owner` is `None` for the diagram root, or a subgraph index for a separately
 /// laid-out (extracted) subgraph. Extracted child subgraphs are emitted as
 /// nested `g.root` groups inside this scope's `nodes` group, mirroring mermaid.
-fn render_scope(s: &mut String, chart: &LaidOutFlowchart, owner: Option<usize>) {
-    // A nested (extracted-subgraph) root carries mermaid's identity transform;
-    // our coordinates are already absolute, so it is a no-op we emit for parity.
-    if owner.is_some() {
-        s.push_str(r#"<g class="root" transform="translate(0, 0)">"#);
-    } else {
-        s.push_str(r#"<g class="root">"#);
+#[allow(clippy::too_many_arguments)]
+fn render_scope(
+    s: &mut String,
+    nodes: &[PlacedNode],
+    edges: &[PlacedEdge],
+    clusters: &[PlacedCluster],
+    scope_offsets: &[(f64, f64)],
+    owner: Option<usize>,
+    parent_off: (f64, f64),
+) {
+    // A nested (extracted-subgraph) g.root carries the offset that positions its
+    // (otherwise local) contents; the root g.root has no transform.
+    match owner {
+        Some(sg) => {
+            let (ax, ay) = scope_offsets[sg];
+            let _ = write!(s, r#"<g class="root" transform="translate({}, {})">"#, round(ax - parent_off.0), round(ay - parent_off.1));
+        }
+        None => s.push_str(r#"<g class="root">"#),
     }
+    let my_off = owner.map(|sg| scope_offsets[sg]).unwrap_or((0.0, 0.0));
 
+    // mermaid emits subgraphs (cluster rects and, below, nested groups) in
+    // reverse definition order; leaf nodes stay in definition order.
     s.push_str(r#"<g class="clusters">"#);
-    for cluster in &chart.clusters {
+    for cluster in clusters {
         // An extracted subgraph draws its own rect in its own scope; an inline
         // cluster draws in the scope it belongs to.
         let here = if cluster.extracted {
@@ -198,24 +247,25 @@ fn render_scope(s: &mut String, chart: &LaidOutFlowchart, owner: Option<usize>) 
     s.push_str("</g>");
 
     s.push_str(r#"<g class="edgePaths">"#);
-    for edge in chart.edges.iter().filter(|e| e.home == owner) {
-        render_edge_path(s, edge, &chart.nodes);
+    for edge in edges.iter().filter(|e| e.home == owner) {
+        render_edge_path(s, edge, nodes);
     }
     s.push_str("</g>");
 
     s.push_str(r#"<g class="edgeLabels">"#);
-    for edge in chart.edges.iter().filter(|e| e.home == owner) {
-        render_edge_label(s, edge, &chart.nodes);
+    for edge in edges.iter().filter(|e| e.home == owner) {
+        render_edge_label(s, edge, nodes);
     }
     s.push_str("</g>");
 
     s.push_str(r#"<g class="nodes">"#);
-    for node in chart.nodes.iter().filter(|n| n.home == owner) {
+    for node in nodes.iter().filter(|n| n.home == owner) {
         render_node(s, node);
     }
-    // Nested extracted subgraphs belonging to this scope.
-    for cluster in chart.clusters.iter().filter(|c| c.extracted && c.home == owner) {
-        render_scope(s, chart, Some(cluster.sg_index));
+    // Nested extracted subgraphs belonging to this scope (clusters are pre-sorted
+    // into mermaid's render order).
+    for cluster in clusters.iter().filter(|c| c.extracted && c.home == owner) {
+        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off);
     }
     s.push_str("</g>");
 
