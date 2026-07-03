@@ -62,6 +62,10 @@ pub struct PlacedCluster {
     /// mermaid render order: reverse of definition order among siblings, parents
     /// before children (a children-reversed DFS of the subgraph tree).
     pub order: usize,
+    /// Inline `style` for the cluster rect (resolved from `style`/`class`).
+    pub shape_style: String,
+    /// Class names applied (added to the cluster group's `class` attribute).
+    pub classes: Vec<String>,
 }
 
 /// A node with a center position and a box size.
@@ -77,6 +81,12 @@ pub struct PlacedNode {
     pub height: f64,
     /// The enclosing extracted subgraph (render scope), or `None` for the root.
     pub home: Option<usize>,
+    /// Inline `style` for the node shape (resolved from `style`/`class`).
+    pub shape_style: String,
+    /// Inline `style` for the node label text (color/font).
+    pub label_style: String,
+    /// Class names applied (added to the node group's `class` attribute).
+    pub classes: Vec<String>,
 }
 
 /// An edge routed as a polyline through `points` (dagre's waypoints, from the
@@ -492,15 +502,20 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         .iter()
         .map(|&(i, cx, cy)| {
             let (w, h) = sizes[i];
+            let n = &chart.nodes[i];
+            let st = crate::style::resolve(&chart.class_defs, &n.classes, &n.styles, true);
             PlacedNode {
-                id: chart.nodes[i].id.clone(),
-                label: chart.nodes[i].label.clone(),
-                shape: chart.nodes[i].shape,
+                id: n.id.clone(),
+                label: n.label.clone(),
+                shape: n.shape,
                 cx,
                 cy,
                 width: w,
                 height: h,
                 home: home_node(chart, &ext, i),
+                shape_style: st.shape,
+                label_style: st.label,
+                classes: n.classes.clone(),
             }
         })
         .collect();
@@ -531,17 +546,23 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     let clusters: Vec<PlacedCluster> = scope
         .clusters
         .iter()
-        .map(|&(s, cx, cy, w, h)| PlacedCluster {
-            id: chart.subgraphs[s].id.clone(),
-            title: chart.subgraphs[s].title.clone(),
-            cx,
-            cy,
-            width: w,
-            height: h,
-            sg_index: s,
-            extracted: ext[s],
-            home: home_sg(chart, &ext, s),
-            order: order[s],
+        .map(|&(s, cx, cy, w, h)| {
+            let sg = &chart.subgraphs[s];
+            let st = crate::style::resolve(&chart.class_defs, &sg.classes, &sg.styles, false);
+            PlacedCluster {
+                id: sg.id.clone(),
+                title: sg.title.clone(),
+                cx,
+                cy,
+                width: w,
+                height: h,
+                sg_index: s,
+                extracted: ext[s],
+                home: home_sg(chart, &ext, s),
+                order: order[s],
+                shape_style: st.shape,
+                classes: sg.classes.clone(),
+            }
         })
         .collect();
 

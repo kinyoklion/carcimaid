@@ -277,9 +277,11 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
     let y = cluster.cy - cluster.height / 2.0;
     let _ = write!(
         s,
-        r#"<g class="cluster" id="{}-{}" data-look="classic"><rect x="{}" y="{}" width="{}" height="{}"/>"#,
+        r#"<g class="cluster{}" id="{}-{}" data-look="classic"><rect{} x="{}" y="{}" width="{}" height="{}"/>"#,
+        class_suffix(&cluster.classes),
         ID,
         escape(&cluster.id),
+        style_attr(&cluster.shape_style),
         round(x),
         round(y),
         round(cluster.width),
@@ -294,14 +296,15 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
         round(y),
     );
     s.push_str(r#"<rect class="background"/>"#);
-    render_text(s, Some(&cluster.title), false);
+    render_text(s, Some(&cluster.title), false, "");
     s.push_str("</g></g></g>");
 }
 
 fn render_node(s: &mut String, node: &PlacedNode) {
     let _ = write!(
         s,
-        r#"<g class="node default" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
+        r#"<g class="node default{}" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
+        class_suffix(&node.classes),
         ID,
         escape(&node.id),
         round(node.cx),
@@ -318,18 +321,38 @@ fn render_node(s: &mut String, node: &PlacedNode) {
         round(-block_h / 2.0),
     );
     s.push_str(r#"<rect class="background"/>"#);
-    render_text(s, Some(&node.label), false);
+    render_text(s, Some(&node.label), false, &node.label_style);
     s.push_str("</g></g></g>");
+}
+
+/// The ` style="…"` attribute for an inline style, or empty when unstyled.
+fn style_attr(style: &str) -> String {
+    if style.is_empty() {
+        String::new()
+    } else {
+        format!(r#" style="{}""#, escape(style))
+    }
+}
+
+/// A trailing class-list suffix (` foo bar`) for the group's `class` attribute,
+/// or empty. mermaid appends applied class names after the base classes.
+fn class_suffix(classes: &[String]) -> String {
+    if classes.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", classes.join(" "))
+    }
 }
 
 /// Emit the node's outline shape, centred at the group origin.
 fn render_shape(s: &mut String, node: &PlacedNode) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+    let st = style_attr(&node.shape_style);
     match node.shape {
         NodeShape::Rectangle => {
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container" x="{}" y="{}" width="{}" height="{}"/>"#,
+                r#"<rect class="basic label-container"{st} x="{}" y="{}" width="{}" height="{}"/>"#,
                 round(-hw),
                 round(-hh),
                 round(node.width),
@@ -340,7 +363,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             let rx = if matches!(node.shape, NodeShape::Stadium) { hh } else { 5.0 };
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container" x="{}" y="{}" rx="{}" ry="{}" width="{}" height="{}"/>"#,
+                r#"<rect class="basic label-container"{st} x="{}" y="{}" rx="{}" ry="{}" width="{}" height="{}"/>"#,
                 round(-hw),
                 round(-hh),
                 round(rx),
@@ -354,7 +377,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             // translated to the node centre), matching mermaid's `cx=0 cy=0`.
             let _ = write!(
                 s,
-                r#"<circle class="basic label-container" cx="0" cy="0" r="{}"/>"#,
+                r#"<circle class="basic label-container"{st} cx="0" cy="0" r="{}"/>"#,
                 round(node.width / 2.0),
             );
         }
@@ -364,7 +387,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             let side = node.width;
             let _ = write!(
                 s,
-                r#"<polygon class="label-container" points="{},0 {},{} {},{} 0,{}" transform="translate({}, {})"/>"#,
+                r#"<polygon class="label-container"{st} points="{},0 {},{} {},{} 0,{}" transform="translate({}, {})"/>"#,
                 round(side / 2.0),
                 round(side),
                 round(-side / 2.0),
@@ -383,6 +406,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 &[(m, 0.0), (w - m, 0.0), (w, -h / 2.0), (w - m, -h), (m, -h), (0.0, -h / 2.0)],
                 -w / 2.0,
                 h / 2.0,
+                &st,
             );
         }
         NodeShape::Subroutine => {
@@ -395,25 +419,26 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 ],
                 -w / 2.0,
                 h / 2.0,
+                &st,
             );
         }
         // Slanted shapes: recover the inner width (dagre width minus the h/2
         // overflow on each side), and lay points out around it.
         NodeShape::Parallelogram => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)], -w / 2.0, h / 2.0);
+            emit_polygon(s, &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
         }
         NodeShape::LeanLeft => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0);
+            emit_polygon(s, &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
         }
         NodeShape::Trapezoid => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)], -w / 2.0, h / 2.0);
+            emit_polygon(s, &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
         }
         NodeShape::InvTrapezoid => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0);
+            emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
         }
         NodeShape::Cylinder => {
             // mermaid's `datastore` is a rect whose stroke-dasharray "{w} {h}"
@@ -421,7 +446,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             let (hw, hh) = (node.width / 2.0, node.height / 2.0);
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container" x="{}" y="{}" width="{}" height="{}" stroke-dasharray="{} {}"/>"#,
+                r#"<rect class="basic label-container"{st} x="{}" y="{}" width="{}" height="{}" stroke-dasharray="{} {}"/>"#,
                 round(-hw), round(-hh), round(node.width), round(node.height),
                 round(node.width), round(node.height),
             );
@@ -429,9 +454,10 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
     }
 }
 
-/// Emit a `<polygon class="label-container">` from `points` with a translate.
-fn emit_polygon(s: &mut String, points: &[(f64, f64)], tx: f64, ty: f64) {
-    s.push_str(r#"<polygon class="label-container" points=""#);
+/// Emit a `<polygon class="label-container">` from `points` with a translate and
+/// an optional inline style attribute.
+fn emit_polygon(s: &mut String, points: &[(f64, f64)], tx: f64, ty: f64, style: &str) {
+    let _ = write!(s, r#"<polygon class="label-container"{style} points=""#);
     for (i, (x, y)) in points.iter().enumerate() {
         if i > 0 {
             s.push(' ');
@@ -617,7 +643,7 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
                 round(bg_w),
                 round(bg_h),
             );
-            render_text(s, Some(label), true);
+            render_text(s, Some(label), true, "");
             s.push_str("</g></g></g>");
         }
         None => {
@@ -627,7 +653,7 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
                 s,
                 r#"<g class="edgeLabel"><g class="label" data-id="{eid}" transform="translate(0, 0)">"#,
             );
-            render_text(s, None, true);
+            render_text(s, None, true, "");
             s.push_str(r#"</g></g><g><rect class="background"/></g>"#);
         }
     }
@@ -639,9 +665,10 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
 /// space, the rest are ` word`). With `label = None` a single empty row is
 /// emitted (mermaid's shape for an unlabelled edge). `anchor` adds
 /// `text-anchor="middle"` (edge labels) on the `<text>` and each row.
-fn render_text(s: &mut String, label: Option<&str>, anchor: bool) {
+fn render_text(s: &mut String, label: Option<&str>, anchor: bool, style: &str) {
     let ta = if anchor { r#" text-anchor="middle""# } else { "" };
-    let _ = write!(s, r#"<text y="{y}"{ta}>"#, y = round(-LABEL_HEIGHT / 2.0 - 0.6), ta = ta);
+    let st = style_attr(style);
+    let _ = write!(s, r#"<text y="{y}"{ta}{st}>"#, y = round(-LABEL_HEIGHT / 2.0 - 0.6), ta = ta, st = st);
 
     let lines = label
         .map(|l| crate::text::wrap_label(l, crate::text::WRAP_WIDTH, 16.0))

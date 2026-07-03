@@ -39,6 +39,8 @@ pub struct Flowchart {
     pub acc_title: Option<String>,
     /// Accessibility description (`accDescr:`/`accDescr { … }`) — as `<desc>`.
     pub acc_descr: Option<String>,
+    /// `classDef <name> <props>` definitions: name → CSS declarations (`k:v`).
+    pub class_defs: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl Flowchart {
@@ -61,6 +63,10 @@ pub struct Subgraph {
     /// Explicit `direction` set inside the subgraph. `None` means mermaid picks
     /// one transposed from the parent (only for subgraphs it lays out separately).
     pub direction: Option<Direction>,
+    /// Class names applied to the subgraph (`class`/`classDef`).
+    pub classes: Vec<String>,
+    /// Direct style declarations (`style <id> <props>`), as `k:v` strings.
+    pub styles: Vec<String>,
 }
 
 /// The outline shape of a flowchart node, selected by mermaid's bracket syntax.
@@ -104,6 +110,10 @@ pub struct Node {
     /// Index into [`Flowchart::subgraphs`] of the subgraph this node belongs to,
     /// if any (the subgraph in whose block the node first appeared).
     pub subgraph: Option<usize>,
+    /// Class names applied to the node (`class`/`classDef`/`:::`).
+    pub classes: Vec<String>,
+    /// Direct style declarations (`style <id> <props>`), as `k:v` strings.
+    pub styles: Vec<String>,
 }
 
 /// The line style of an edge.

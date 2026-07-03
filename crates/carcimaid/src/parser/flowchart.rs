@@ -53,7 +53,14 @@ pub fn parse(source: &str) -> Result<Flowchart> {
         if let Some(rest) = subgraph_header(stmt) {
             let parent = stack.last().copied();
             let (id, title) = parse_subgraph_header(rest, chart.subgraphs.len());
-            chart.subgraphs.push(Subgraph { id, title, parent, direction: None });
+            chart.subgraphs.push(Subgraph {
+                id,
+                title,
+                parent,
+                direction: None,
+                classes: Vec::new(),
+                styles: Vec::new(),
+            });
             stack.push(chart.subgraphs.len() - 1);
         } else if stmt == "end" {
             stack.pop();
@@ -64,6 +71,12 @@ pub fn parse(source: &str) -> Result<Flowchart> {
             if let (Some(&top), Some(d)) = (stack.last(), parse_direction(dir.trim())) {
                 chart.subgraphs[top].direction = Some(d);
             }
+        } else if let Some(rest) = strip_kw(stmt, "classDef") {
+            parse_class_def(rest, &mut chart);
+        } else if let Some(rest) = strip_kw(stmt, "class") {
+            parse_class_apply(rest, &mut chart);
+        } else if let Some(rest) = strip_kw(stmt, "style") {
+            parse_style(rest, &mut chart);
         } else if is_directive_stmt(stmt) {
             // Styling/interaction directives (`classDef`, `class`, `style`,
             // `linkStyle`, `click`) and `direction` are not nodes/edges; skip
@@ -138,6 +151,73 @@ fn is_directive_stmt(stmt: &str) -> bool {
         stmt.split_whitespace().next(),
         Some("direction" | "classDef" | "class" | "style" | "linkStyle" | "click")
     )
+}
+
+/// If `stmt` begins with keyword `kw` followed by whitespace, return the rest.
+fn strip_kw<'a>(stmt: &'a str, kw: &str) -> Option<&'a str> {
+    stmt.strip_prefix(kw).filter(|r| r.starts_with(char::is_whitespace)).map(str::trim)
+}
+
+/// Split a comma-separated CSS declaration list into trimmed `k:v` strings,
+/// dropping empties and stray `!important` markers (added back at render time).
+fn split_css(props: &str) -> Vec<String> {
+    props
+        .split(',')
+        .map(|p| p.replace("!important", "").trim().trim_end_matches(';').trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// `classDef <names> <props>` — one or more comma-separated class names sharing
+/// a CSS declaration list.
+fn parse_class_def(rest: &str, chart: &mut Flowchart) {
+    let Some((names, props)) = rest.split_once(char::is_whitespace) else {
+        return;
+    };
+    let decls = split_css(props);
+    for name in names.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        chart.class_defs.entry(name.to_string()).or_default().extend(decls.iter().cloned());
+    }
+}
+
+/// `class <ids> <className>` — apply a class to one or more nodes/subgraphs.
+fn parse_class_apply(rest: &str, chart: &mut Flowchart) {
+    let Some((ids, name)) = rest.rsplit_once(char::is_whitespace) else {
+        return;
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return;
+    }
+    for id in ids.split(',').map(str::trim).filter(|i| !i.is_empty()) {
+        add_class(chart, id, name);
+    }
+}
+
+/// `style <id> <props>` — direct inline styles on a node or subgraph.
+fn parse_style(rest: &str, chart: &mut Flowchart) {
+    let Some((id, props)) = rest.split_once(char::is_whitespace) else {
+        return;
+    };
+    let decls = split_css(props);
+    if let Some(idx) = chart.node_index(id.trim()) {
+        chart.nodes[idx].styles.extend(decls);
+    } else if let Some(sg) = chart.subgraphs.iter_mut().find(|s| s.id == id.trim()) {
+        sg.styles.extend(decls);
+    }
+}
+
+/// Add a class name to a node (or subgraph) by id.
+fn add_class(chart: &mut Flowchart, id: &str, name: &str) {
+    if let Some(idx) = chart.node_index(id) {
+        if !chart.nodes[idx].classes.iter().any(|c| c == name) {
+            chart.nodes[idx].classes.push(name.to_string());
+        }
+    } else if let Some(sg) = chart.subgraphs.iter_mut().find(|s| s.id == id) {
+        if !sg.classes.iter().any(|c| c == name) {
+            sg.classes.push(name.to_string());
+        }
+    }
 }
 
 /// Parse a subgraph header body into (id, title). Forms: `` (anonymous),
@@ -337,8 +417,8 @@ fn detect_op(s: &str) -> Option<(usize, EdgeStyle, bool)> {
 /// index. If the endpoint carries a shape/label, it updates the existing node.
 /// A newly-created node is assigned to `current` (the enclosing subgraph).
 fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) -> usize {
-    let (id, shape, label) = parse_endpoint(endpoint);
-    if let Some(idx) = chart.node_index(&id) {
+    let (id, shape, label, class) = parse_endpoint(endpoint);
+    let idx = if let Some(idx) = chart.node_index(&id) {
         if let Some(label) = label {
             chart.nodes[idx].label = label;
             chart.nodes[idx].shape = shape;
@@ -348,16 +428,24 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) ->
         if current.is_some() && chart.nodes[idx].subgraph.is_none() {
             chart.nodes[idx].subgraph = current;
         }
-        return idx;
+        idx
+    } else {
+        let label = label.unwrap_or_else(|| id.clone());
+        chart.nodes.push(Node { id, label, shape, subgraph: current, classes: Vec::new(), styles: Vec::new() });
+        chart.nodes.len() - 1
+    };
+    // Inline `id:::className` class assignment.
+    if let Some(class) = class {
+        if !chart.nodes[idx].classes.contains(&class) {
+            chart.nodes[idx].classes.push(class);
+        }
     }
-    let label = label.unwrap_or_else(|| id.clone());
-    chart.nodes.push(Node { id, label, shape, subgraph: current });
-    chart.nodes.len() - 1
+    idx
 }
 
-/// Strip a trailing `:::className` (inline class assignment) that appears at
-/// bracket depth 0, leaving the node id/shape spec.
-fn strip_class(endpoint: &str) -> &str {
+/// Split a trailing `:::className` (inline class assignment) at bracket depth 0,
+/// returning the node id/shape spec and the class name (if any).
+fn split_class(endpoint: &str) -> (&str, Option<String>) {
     let mut depth = 0i32;
     let mut i = 0;
     while i < endpoint.len() {
@@ -366,13 +454,14 @@ fn strip_class(endpoint: &str) -> &str {
             '[' | '(' | '{' => depth += 1,
             ']' | ')' | '}' => depth -= 1,
             ':' if depth == 0 && endpoint[i..].starts_with(":::") => {
-                return endpoint[..i].trim();
+                let class = endpoint[i + 3..].trim();
+                return (endpoint[..i].trim(), (!class.is_empty()).then(|| class.to_string()));
             }
             _ => {}
         }
         i += c.len_utf8();
     }
-    endpoint
+    (endpoint, None)
 }
 
 /// Map a mermaid v11 shape name/alias to a [`NodeShape`]. Unknown shapes fall
@@ -431,19 +520,19 @@ fn parse_at_metadata(inner: &str) -> (NodeShape, Option<String>) {
 }
 
 /// Parse an endpoint token into (id, shape, optional label).
-fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>) {
-    let endpoint = strip_class(endpoint.trim());
+fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>, Option<String>) {
+    let (endpoint, class) = split_class(endpoint.trim());
     // mermaid v11 `id@{ shape: …, label: "…" }` node-metadata syntax.
     if let Some(at) = endpoint.find("@{") {
         let id = endpoint[..at].trim().to_string();
         let inner = endpoint[at + 2..].trim().strip_suffix('}').unwrap_or(&endpoint[at + 2..]);
         let (shape, label) = parse_at_metadata(inner);
-        return (id, shape, label);
+        return (id, shape, label, class);
     }
     // Find where the shape bracket (if any) begins.
     let open = endpoint.find(['[', '(', '{']);
     let Some(open) = open else {
-        return (endpoint.to_string(), NodeShape::Rectangle, None);
+        return (endpoint.to_string(), NodeShape::Rectangle, None, class);
     };
 
     let id = endpoint[..open].trim().to_string();
@@ -478,10 +567,10 @@ fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>) {
         (NodeShape::Rhombus, inner)
     } else {
         // Unbalanced/unknown bracketing — treat the whole token as an id.
-        return (endpoint.to_string(), NodeShape::Rectangle, None);
+        return (endpoint.to_string(), NodeShape::Rectangle, None, class);
     };
 
-    (id, shape, Some(unquote(inner).to_string()))
+    (id, shape, Some(unquote(inner).to_string()), class)
 }
 
 /// Strip a single pair of surrounding double quotes from a label, if present.
