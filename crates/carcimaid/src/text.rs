@@ -56,21 +56,54 @@ pub fn wrap_label(label: &str, max_width: f64, font_size: f64) -> Vec<Vec<String
     for segment in label.split('\n') {
         let mut cur: Vec<String> = Vec::new();
         for word in segment.split_whitespace() {
-            if cur.is_empty() {
+            let candidate = if cur.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", cur.join(" "), word)
+            };
+            if measure_width(&candidate, font_size) <= max_width {
                 cur.push(word.to_string());
                 continue;
             }
-            let candidate = format!("{} {}", cur.join(" "), word);
-            if measure_width(&candidate, font_size) > max_width {
+            // The word doesn't fit on the current line: flush it first.
+            if !cur.is_empty() {
                 lines.push(std::mem::take(&mut cur));
             }
-            cur.push(word.to_string());
+            // A word longer than the whole line is broken at character level
+            // (matching mermaid); the last chunk stays open for following words.
+            if measure_width(word, font_size) > max_width {
+                let mut chunks = break_word(word, max_width, font_size);
+                let last = chunks.pop().unwrap_or_default();
+                for chunk in chunks {
+                    lines.push(vec![chunk]);
+                }
+                cur.push(last);
+            } else {
+                cur.push(word.to_string());
+            }
         }
         if !cur.is_empty() {
             lines.push(cur);
         }
     }
     lines
+}
+
+/// Break a single over-long word into consecutive character chunks that each fit
+/// within `max_width` (mermaid's break-word behaviour for unbreakable tokens).
+fn break_word(word: &str, max_width: f64, font_size: f64) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut cur = String::new();
+    for ch in word.chars() {
+        if !cur.is_empty() && measure_width(&format!("{cur}{ch}"), font_size) > max_width {
+            chunks.push(std::mem::take(&mut cur));
+        }
+        cur.push(ch);
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+    chunks
 }
 
 /// Replace HTML line breaks (`<br>`, `<br/>`, `<br />`, any case) with `\n` so
