@@ -10,19 +10,29 @@ pub fn block(id: &str) -> String {
     TEMPLATE.replace("{ID}", id)
 }
 
-/// A colour-matched `pointEnd` marker variant for a stroke-coloured edge — the
-/// default end arrow with the colour applied and an id suffixed by the colour,
-/// exactly as mermaid emits for `linkStyle stroke:<colour>`.
-pub fn colored_point_end(id: &str, color: &str) -> String {
+/// A colour-matched `point` arrow marker variant (`side` = "Start" or "End") for
+/// a stroke-coloured edge — the default point arrow with the colour applied and
+/// an id suffixed by the colour, as mermaid emits for `linkStyle stroke:<colour>`.
+pub fn colored_point(id: &str, side: &str, color: &str) -> String {
+    // Start/end share geometry apart from refX (mermaid keeps refX=5 for both
+    // colour variants; only orientation differs, handled by `orient="auto"`).
+    let (refx, d) = if side == "Start" {
+        ("4.5", "M 0 5 L 10 10 L 10 0 z")
+    } else {
+        ("5", "M 0 0 L 10 5 L 0 10 z")
+    };
     format!(
         concat!(
-            r#"<marker id="{id}_flowchart-v2-pointEnd_{color}" class="marker flowchart-v2" "#,
-            r#"viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" "#,
-            r#"markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" "#,
+            r#"<marker id="{id}_flowchart-v2-point{side}_{color}" class="marker flowchart-v2" "#,
+            r#"viewBox="0 0 10 10" refX="{refx}" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" "#,
+            r#"markerHeight="8" orient="auto"><path d="{d}" class="arrowMarkerPath" "#,
             r#"style="stroke-width: 1; stroke-dasharray: 1, 0;" stroke="{color}" fill="{color}"/></marker>"#,
         ),
         id = id,
+        side = side,
         color = color,
+        refx = refx,
+        d = d,
     )
 }
 

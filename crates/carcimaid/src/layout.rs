@@ -97,8 +97,9 @@ pub struct PlacedEdge {
     pub to: usize,
     pub label: Option<String>,
     pub points: Vec<(f64, f64)>,
-    /// Whether the edge has an arrowhead at the `to` end.
-    pub arrow: bool,
+    /// Arrowhead type at the `from`/`to` ends.
+    pub arrow_start: crate::ir::ArrowType,
+    pub arrow_end: crate::ir::ArrowType,
     /// Dagre-computed label position (center), if the edge has a label.
     pub label_pos: Option<(f64, f64)>,
     /// Inline `style` for the edge path (resolved from `linkStyle`), or empty.
@@ -556,7 +557,8 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
                 to: node_at[e.to],
                 label: e.label.clone(),
                 points: points.clone(),
-                arrow: e.arrow,
+                arrow_start: e.arrow_start,
+                arrow_end: e.arrow_end,
                 label_pos,
                 style,
                 stroke,

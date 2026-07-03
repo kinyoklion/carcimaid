@@ -128,6 +128,20 @@ pub enum EdgeStyle {
     Thick,
 }
 
+/// An arrowhead type at an edge end (mermaid's `>` / `x` / `o`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArrowType {
+    /// No arrowhead (open end).
+    #[default]
+    None,
+    /// `>` — the standard triangular arrow (`pointEnd`/`pointStart`).
+    Point,
+    /// `x` — a cross (`crossEnd`/`crossStart`).
+    Cross,
+    /// `o` — a circle (`circleEnd`/`circleStart`).
+    Circle,
+}
+
 /// A directed (or plain) connection between two nodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
@@ -135,11 +149,13 @@ pub struct Edge {
     pub from: usize,
     /// Index into [`Flowchart::nodes`].
     pub to: usize,
-    /// Optional text label on the edge (`A -->|label| B`).
+    /// Optional text label on the edge (`A -->|label| B` or `A -- label --> B`).
     pub label: Option<String>,
     pub style: EdgeStyle,
-    /// Whether the edge draws an arrowhead at the `to` end.
-    pub arrow: bool,
+    /// Arrowhead at the `from` end (`<--`, `x--`, `o--`).
+    pub arrow_start: ArrowType,
+    /// Arrowhead at the `to` end (`-->`, `--x`, `--o`).
+    pub arrow_end: ArrowType,
     /// `linkStyle` CSS declarations (`k:v`) applied to this edge.
     pub link_style: Vec<String>,
 }

@@ -25,7 +25,7 @@
 
 mod markers;
 
-use crate::ir::NodeShape;
+use crate::ir::{ArrowType, NodeShape};
 use crate::layout::{LaidOut, LaidOutFlowchart, PlacedCluster, PlacedEdge, PlacedNode};
 use std::fmt::Write;
 
@@ -153,14 +153,15 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
     render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0));
-    // Colour-matched arrow markers for stroke-coloured edges (unique colours,
-    // first-seen order) — mermaid appends these after g.root in the wrapper.
-    let mut seen: Vec<&str> = Vec::new();
+    // Colour-matched point-arrow markers for stroke-coloured edges (unique
+    // (side, colour), first-seen order) — mermaid appends these after g.root.
+    let mut seen: Vec<(&str, &str)> = Vec::new();
     for e in &chart.edges {
-        if let Some(c) = e.stroke.as_deref() {
-            if !seen.contains(&c) {
-                seen.push(c);
-                s.push_str(&markers::colored_point_end(ID, c));
+        let Some(c) = e.stroke.as_deref() else { continue };
+        for (side, kind) in [("Start", e.arrow_start), ("End", e.arrow_end)] {
+            if kind == crate::ir::ArrowType::Point && !seen.contains(&(side, c)) {
+                seen.push((side, c));
+                s.push_str(&markers::colored_point(ID, side, c));
             }
         }
     }
@@ -506,17 +507,21 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
             points[n - 1] = p;
         }
     }
-    if edge.arrow {
+    // Arrowheads shorten the path at each end so the marker sits flush.
+    if edge.arrow_end != ArrowType::None {
         clip_end(&mut points, ARROW_INSET);
     }
+    if edge.arrow_start != ArrowType::None {
+        points.reverse();
+        clip_end(&mut points, ARROW_INSET);
+        points.reverse();
+    }
     let d = curve_basis(&points);
-    // A stroke-coloured edge uses a colour-matched arrow marker variant.
-    let marker = if edge.arrow {
-        let suffix = edge.stroke.as_deref().map(|c| format!("_{c}")).unwrap_or_default();
-        format!(r#" marker-end="url(#{ID}_flowchart-v2-pointEnd{suffix})""#)
-    } else {
-        String::new()
-    };
+    let marker = format!(
+        "{}{}",
+        marker_ref("Start", edge.arrow_start, edge.stroke.as_deref()),
+        marker_ref("End", edge.arrow_end, edge.stroke.as_deref()),
+    );
     let _ = write!(
         s,
         concat!(
@@ -530,6 +535,30 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
         d = d,
         marker = marker,
     );
+}
+
+/// The base marker name for an arrow type, or `None` for no arrowhead.
+fn marker_name(kind: ArrowType) -> Option<&'static str> {
+    match kind {
+        ArrowType::None => None,
+        ArrowType::Point => Some("point"),
+        ArrowType::Cross => Some("cross"),
+        ArrowType::Circle => Some("circle"),
+    }
+}
+
+/// The ` marker-start`/` marker-end` attribute for an arrow end, or empty. Only
+/// point arrows get a colour-matched variant (matching mermaid's marker set).
+fn marker_ref(side: &str, kind: ArrowType, color: Option<&str>) -> String {
+    let Some(name) = marker_name(kind) else {
+        return String::new();
+    };
+    let suffix = match (kind, color) {
+        (ArrowType::Point, Some(c)) => format!("_{c}"),
+        _ => String::new(),
+    };
+    let attr = if side == "Start" { "marker-start" } else { "marker-end" };
+    format!(r#" {attr}="url(#{ID}_flowchart-v2-{name}{side}{suffix})""#)
 }
 
 /// The point where the ray from a node's centre toward `toward` crosses the

@@ -10,7 +10,7 @@
 //! inline-label form. These are recognised loosely and skipped rather than
 //! erroring, so partially-supported diagrams still produce output.
 
-use crate::ir::{Direction, Edge, EdgeStyle, Flowchart, Node, NodeShape, Subgraph};
+use crate::ir::{ArrowType, Direction, Edge, EdgeStyle, Flowchart, Node, NodeShape, Subgraph};
 use crate::Result;
 
 /// Parse a flowchart from full source (including its header line).
@@ -300,7 +300,8 @@ fn parse_statement(stmt: &str, chart: &mut Flowchart, current: Option<usize>) {
                     to,
                     label: op.label.clone(),
                     style: op.style,
-                    arrow: op.arrow,
+                    arrow_start: op.start,
+                    arrow_end: op.end,
                     link_style: Vec::new(),
                 });
             }
@@ -344,10 +345,11 @@ fn split_group(endpoint: &str) -> Vec<String> {
     parts
 }
 
-/// A parsed edge operator with its optional `|label|`.
+/// A parsed edge operator with its optional label.
 struct EdgeOp {
     style: EdgeStyle,
-    arrow: bool,
+    start: ArrowType,
+    end: ArrowType,
     label: Option<String>,
 }
 
@@ -393,25 +395,33 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                 i += clen;
             }
             _ if depth == 0 => {
-                if let Some((len, style, arrow)) = detect_op(&stmt[i..]) {
+                // `o`/`x` start arrows are only valid at a token boundary, else
+                // they'd match the trailing letter of an id like `foo-->` / `box-->`.
+                let boundary = cur.chars().last().is_none_or(char::is_whitespace);
+                if let Some((len, style, start, end, mid)) = detect_link(&stmt[i..], boundary) {
                     endpoints.push(cur.trim().to_string());
                     cur = String::new();
                     i += len;
-                    // Optional `|label|` immediately after the operator.
-                    let rest = stmt[i..].trim_start();
-                    let label = if rest.starts_with('|') {
-                        let consumed = stmt.len() - rest.len();
-                        let after_bar = &rest[1..];
-                        if let Some(end) = after_bar.find('|') {
-                            i = consumed + 1 + end + 1;
-                            Some(after_bar[..end].trim().to_string())
+                    // Label: the `-- text -->` middle text, else a `|label|`
+                    // immediately after the operator.
+                    let label = if mid.is_some() {
+                        mid
+                    } else {
+                        let rest = stmt[i..].trim_start();
+                        if rest.starts_with('|') {
+                            let consumed = stmt.len() - rest.len();
+                            let after_bar = &rest[1..];
+                            if let Some(bar) = after_bar.find('|') {
+                                i = consumed + 1 + bar + 1;
+                                Some(after_bar[..bar].trim().to_string())
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
-                    } else {
-                        None
                     };
-                    ops.push(EdgeOp { style, arrow, label });
+                    ops.push(EdgeOp { style, start, end, label });
                 } else {
                     cur.push(c);
                     i += clen;
@@ -427,20 +437,91 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
     (endpoints, ops)
 }
 
-/// Detect an edge operator at the start of `s`, returning its byte length,
-/// style, and whether it has an arrowhead. Longer operators are matched first.
-fn detect_op(s: &str) -> Option<(usize, EdgeStyle, bool)> {
-    const OPS: &[(&str, EdgeStyle, bool)] = &[
-        ("-.->", EdgeStyle::Dotted, true),
-        ("-.-", EdgeStyle::Dotted, false),
-        ("==>", EdgeStyle::Thick, true),
-        ("===", EdgeStyle::Thick, false),
-        ("-->", EdgeStyle::Solid, true),
-        ("---", EdgeStyle::Solid, false),
-    ];
-    OPS.iter()
-        .find(|(pat, ..)| s.starts_with(pat))
-        .map(|&(pat, style, arrow)| (pat.len(), style, arrow))
+/// Detect an edge link at the start of `s`, returning its byte length, style,
+/// start/end arrow types, and any `-- text --` middle label. Handles solid
+/// (`--`), thick (`==`), and dotted (`-.-`) links, optional start arrows
+/// (`<`/`x`/`o`), optional end arrows (`>`/`x`/`o`), and inline middle text.
+fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, ArrowType, Option<String>)> {
+    let b = s.as_bytes();
+    let mut i = 0;
+
+    // Optional start arrow. `x`/`o` are only arrows at a token boundary (else
+    // they'd match the last letter of an id like `foo-->`); `<` always is.
+    let start = match b.first().copied() {
+        Some(b'<') => {
+            i = 1;
+            ArrowType::Point
+        }
+        Some(b'x') if boundary && matches!(b.get(1), Some(b'-') | Some(b'=')) => {
+            i = 1;
+            ArrowType::Cross
+        }
+        Some(b'o') if boundary && matches!(b.get(1), Some(b'-') | Some(b'=')) => {
+            i = 1;
+            ArrowType::Circle
+        }
+        _ => ArrowType::None,
+    };
+    let end_arrow = |p: usize| -> Option<(ArrowType, usize)> {
+        match b.get(p).copied() {
+            Some(b'>') => Some((ArrowType::Point, p + 1)),
+            Some(b'x') => Some((ArrowType::Cross, p + 1)),
+            Some(b'o') => Some((ArrowType::Circle, p + 1)),
+            _ => None,
+        }
+    };
+
+    // Dotted (`-.-`, `-.->`, `-. text .->`).
+    if b.get(i) == Some(&b'-') && b.get(i + 1) == Some(&b'.') {
+        i += 2; // opening "-."
+        if b.get(i) == Some(&b'-') {
+            i += 1; // closing dash
+            let (end, j) = end_arrow(i).unwrap_or((ArrowType::None, i));
+            return Some((j, EdgeStyle::Dotted, start, end, None));
+        }
+        // Middle text delimited by the closing ".-".
+        if let Some(rel) = s[i..].find(".-") {
+            let text = s[i..i + rel].trim().to_string();
+            let after = i + rel + 2;
+            let (end, j) = end_arrow(after).unwrap_or((ArrowType::None, after));
+            return Some((j, EdgeStyle::Dotted, start, end, (!text.is_empty()).then_some(text)));
+        }
+        return None;
+    }
+
+    // Solid (`-`) or thick (`=`).
+    let line = match b.get(i).copied() {
+        Some(b'=') => b'=',
+        Some(b'-') => b'-',
+        _ => return None,
+    };
+    let style = if line == b'=' { EdgeStyle::Thick } else { EdgeStyle::Solid };
+    let open_start = i;
+    while b.get(i) == Some(&line) {
+        i += 1;
+    }
+    if i - open_start < 2 && start == ArrowType::None {
+        return None; // a lone `-`/`=` is not a link
+    }
+    // Immediate end arrow: `-->`, `==>`, `--x`, `<-->`, …
+    if let Some((end, j)) = end_arrow(i) {
+        return Some((j, style, start, end, None));
+    }
+    // Middle text: text up to the next line run, then that run + optional arrow.
+    let close = if line == b'=' { "==" } else { "--" };
+    if let Some(rel) = s[i..].find(close) {
+        let text = s[i..i + rel].trim().to_string();
+        if !text.is_empty() {
+            let mut j = i + rel;
+            while b.get(j) == Some(&line) {
+                j += 1;
+            }
+            let (end, j2) = end_arrow(j).unwrap_or((ArrowType::None, j));
+            return Some((j2, style, start, end, Some(text)));
+        }
+    }
+    // Bare open link (`--`, `---`, `==`, `===`).
+    Some((i, style, start, ArrowType::None, None))
 }
 
 /// Ensure a node parsed from `endpoint` exists in the chart, returning its
