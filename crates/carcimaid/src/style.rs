@@ -52,11 +52,15 @@ pub fn resolve(
     direct: &[String],
     include_default: bool,
 ) -> Resolved {
-    // Ordered declarations: default class, then explicit classes, then direct.
+    // Ordered declarations: implicit base classes, then explicit classes, then
+    // direct styles. mermaid applies `classDef default` and `classDef node` to
+    // every node (both match a node's base element classes).
     let mut decls: Vec<&str> = Vec::new();
     if include_default {
-        if let Some(d) = class_defs.get("default") {
-            decls.extend(d.iter().map(String::as_str));
+        for base in ["default", "node"] {
+            if let Some(d) = class_defs.get(base) {
+                decls.extend(d.iter().map(String::as_str));
+            }
         }
     }
     for c in classes {

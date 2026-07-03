@@ -315,9 +315,12 @@ fn render_node(s: &mut String, node: &PlacedNode) {
     // multi-line) text is vertically centred, matching mermaid.
     let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0).len().max(1);
     let block_h = LABEL_HEIGHT + (n as f64 - 1.0) * LINE_SPACING;
+    // Label styles (color/font) sit on the g.label; the <text> gets them with
+    // `color:` rewritten to `fill:` (see render_text), matching mermaid.
     let _ = write!(
         s,
-        r#"<g class="label" transform="translate(0, {})"><rect/><g>"#,
+        r#"<g class="label"{} transform="translate(0, {})"><rect/><g>"#,
+        style_attr(&node.label_style),
         round(-block_h / 2.0),
     );
     s.push_str(r#"<rect class="background" style="stroke: none"/>"#);
@@ -667,7 +670,8 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
 /// `text-anchor="middle"` (edge labels) on the `<text>` and each row.
 fn render_text(s: &mut String, label: Option<&str>, anchor: bool, style: &str) {
     let ta = if anchor { r#" text-anchor="middle""# } else { "" };
-    let st = style_attr(style);
+    // On the SVG <text>, mermaid applies label styles with `color:` as `fill:`.
+    let st = style_attr(&style.replace("color:", "fill:"));
     let _ = write!(s, r#"<text y="{y}"{ta}{st}>"#, y = round(-LABEL_HEIGHT / 2.0 - 0.6), ta = ta, st = st);
 
     let lines = label
