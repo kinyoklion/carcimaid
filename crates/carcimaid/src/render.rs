@@ -561,6 +561,38 @@ fn marker_ref(side: &str, kind: ArrowType, color: Option<&str>) -> String {
     format!(r#" {attr}="url(#{ID}_flowchart-v2-{name}{side}{suffix})""#)
 }
 
+/// Where the ray from a rounded-rect's centre toward `toward` crosses its
+/// outline (radius `r` corners). On the straight edges this is the rect border;
+/// in a corner it is the quarter-circle arc.
+fn clip_rounded_rect(c: (f64, f64), w: f64, h: f64, r: f64, toward: (f64, f64)) -> (f64, f64) {
+    let (dx, dy) = (toward.0 - c.0, toward.1 - c.1);
+    if dx == 0.0 && dy == 0.0 {
+        return c;
+    }
+    let (hw, hh) = (w / 2.0, h / 2.0);
+    // Sharp-rect intersection first.
+    let tx = if dx != 0.0 { hw / dx.abs() } else { f64::MAX };
+    let ty = if dy != 0.0 { hh / dy.abs() } else { f64::MAX };
+    let t = tx.min(ty);
+    let (px, py) = (dx * t, dy * t);
+    // Inner rectangle whose corners are the arc centres.
+    let (ix, iy) = (hw - r, hh - r);
+    if px.abs() > ix && py.abs() > iy {
+        // Corner region: intersect the ray with the corner arc's circle.
+        let corner = (ix * px.signum(), iy * py.signum());
+        // |t*d - corner| = r  ->  quadratic in t; take the far (exit) root.
+        let a = dx * dx + dy * dy;
+        let b = -2.0 * (dx * corner.0 + dy * corner.1);
+        let cc = corner.0 * corner.0 + corner.1 * corner.1 - r * r;
+        let disc = b * b - 4.0 * a * cc;
+        if disc >= 0.0 {
+            let t = (-b + disc.sqrt()) / (2.0 * a);
+            return (c.0 + dx * t, c.1 + dy * t);
+        }
+    }
+    (c.0 + px, c.1 + py)
+}
+
 /// The point where the ray from a node's centre toward `toward` crosses the
 /// node's actual shape boundary. `None` for rectangular shapes (dagre already
 /// routes to the rect border, matching mermaid).
@@ -574,6 +606,11 @@ fn clip_to_shape(node: &PlacedNode, toward: (f64, f64)) -> Option<(f64, f64)> {
         }
         let r = node.width / 2.0;
         return Some((c.0 + dx / len * r, c.1 + dy / len * r));
+    }
+    // Stadium (pill) has fully-rounded ends; a diagonal edge would otherwise end
+    // at the bounding-box corner, outside the shape. Clip to the rounded outline.
+    if let NodeShape::Stadium = node.shape {
+        return Some(clip_rounded_rect(c, node.width, node.height, node.height / 2.0, toward));
     }
     let poly = shape_boundary(node)?;
     // Find where segment centre→toward crosses a polygon edge.
