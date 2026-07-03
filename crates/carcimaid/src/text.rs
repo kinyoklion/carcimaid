@@ -52,6 +52,7 @@ pub const WRAP_WIDTH: f64 = 200.0;
 /// words (without inter-word spaces); blank segments are dropped.
 pub fn wrap_label(label: &str, max_width: f64, font_size: f64) -> Vec<Vec<String>> {
     let mut lines: Vec<Vec<String>> = Vec::new();
+    let label = replace_br(label);
     for segment in label.split('\n') {
         let mut cur: Vec<String> = Vec::new();
         for word in segment.split_whitespace() {
@@ -70,6 +71,32 @@ pub fn wrap_label(label: &str, max_width: f64, font_size: f64) -> Vec<Vec<String
         }
     }
     lines
+}
+
+/// Replace HTML line breaks (`<br>`, `<br/>`, `<br />`, any case) with `\n` so
+/// they act as forced line breaks, matching mermaid's label handling.
+fn replace_br(s: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < s.len() {
+        if lower[i..].starts_with("<br") {
+            // Must be a real <br…> tag: after "br" comes `>`, `/`, or whitespace.
+            let after = &lower[i + 3..];
+            let is_tag = after.starts_with('>') || after.starts_with('/') || after.starts_with(char::is_whitespace);
+            if is_tag {
+                if let Some(gt) = s[i..].find('>') {
+                    out.push('\n');
+                    i += gt + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// Measured width of a wrapped line (its words joined by single spaces).

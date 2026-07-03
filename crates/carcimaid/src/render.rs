@@ -376,6 +376,18 @@ const ARROW_INSET: f64 = 4.0;
 
 fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
     let mut points = edge.points.clone();
+    // Clip the endpoints to the actual node shapes (dagre routes to the node's
+    // bounding box; non-rect shapes are inset, so an unclipped edge detaches
+    // from a diamond/circle/etc.). mermaid does the same via shape intersection.
+    if points.len() >= 2 {
+        if let Some(p) = clip_to_shape(&nodes[edge.from], points[1]) {
+            points[0] = p;
+        }
+        let n = points.len();
+        if let Some(p) = clip_to_shape(&nodes[edge.to], points[n - 2]) {
+            points[n - 1] = p;
+        }
+    }
     if edge.arrow {
         clip_end(&mut points, ARROW_INSET);
     }
@@ -397,6 +409,86 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
         d = d,
         marker = marker,
     );
+}
+
+/// The point where the ray from a node's centre toward `toward` crosses the
+/// node's actual shape boundary. `None` for rectangular shapes (dagre already
+/// routes to the rect border, matching mermaid).
+fn clip_to_shape(node: &PlacedNode, toward: (f64, f64)) -> Option<(f64, f64)> {
+    let c = (node.cx, node.cy);
+    if let NodeShape::Circle = node.shape {
+        let (dx, dy) = (toward.0 - c.0, toward.1 - c.1);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len == 0.0 {
+            return None;
+        }
+        let r = node.width / 2.0;
+        return Some((c.0 + dx / len * r, c.1 + dy / len * r));
+    }
+    let poly = shape_boundary(node)?;
+    // Find where segment centre→toward crosses a polygon edge.
+    for w in poly.windows(2) {
+        if let Some(p) = segment_intersect(c, toward, w[0], w[1]) {
+            return Some(p);
+        }
+    }
+    // (windows misses the closing edge) check last→first too.
+    if let (Some(&a), Some(&b)) = (poly.last(), poly.first()) {
+        segment_intersect(c, toward, a, b)
+    } else {
+        None
+    }
+}
+
+/// Absolute polygon vertices of a node's outline (matching render_shape), or
+/// `None` for rectangular shapes.
+fn shape_boundary(node: &PlacedNode) -> Option<Vec<(f64, f64)>> {
+    let (cx, cy, w, h) = (node.cx, node.cy, node.width, node.height);
+    let map = |pts: &[(f64, f64)], tx: f64, ty: f64| -> Vec<(f64, f64)> {
+        pts.iter().map(|&(x, y)| (x + tx + cx, y + ty + cy)).collect()
+    };
+    match node.shape {
+        NodeShape::Rhombus => {
+            let s = w;
+            Some(map(&[(s / 2.0, 0.0), (s, -s / 2.0), (s / 2.0, -s), (0.0, -s / 2.0)], -s / 2.0 + 0.5, s / 2.0))
+        }
+        NodeShape::Hexagon => {
+            let m = h / 4.0;
+            Some(map(&[(m, 0.0), (w - m, 0.0), (w, -h / 2.0), (w - m, -h), (m, -h), (0.0, -h / 2.0)], -w / 2.0, h / 2.0))
+        }
+        NodeShape::Parallelogram => {
+            let iw = w - h;
+            Some(map(&[(-h / 2.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (0.0, -h)], -iw / 2.0, h / 2.0))
+        }
+        NodeShape::LeanLeft => {
+            let iw = w - h;
+            Some(map(&[(0.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (-h / 2.0, -h)], -iw / 2.0, h / 2.0))
+        }
+        NodeShape::Trapezoid => {
+            let iw = w - h;
+            Some(map(&[(-h / 2.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (0.0, -h)], -iw / 2.0, h / 2.0))
+        }
+        NodeShape::InvTrapezoid => {
+            let iw = w - h;
+            Some(map(&[(0.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (-h / 2.0, -h)], -iw / 2.0, h / 2.0))
+        }
+        _ => None,
+    }
+}
+
+/// Intersection point of segments p1→p2 and p3→p4, if they cross.
+fn segment_intersect(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), p4: (f64, f64)) -> Option<(f64, f64)> {
+    let d = (p2.0 - p1.0) * (p4.1 - p3.1) - (p2.1 - p1.1) * (p4.0 - p3.0);
+    if d.abs() < 1e-9 {
+        return None;
+    }
+    let t = ((p3.0 - p1.0) * (p4.1 - p3.1) - (p3.1 - p1.1) * (p4.0 - p3.0)) / d;
+    let u = ((p3.0 - p1.0) * (p2.1 - p1.1) - (p3.1 - p1.1) * (p2.0 - p1.0)) / d;
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some((p1.0 + t * (p2.0 - p1.0), p1.1 + t * (p2.1 - p1.1)))
+    } else {
+        None
+    }
 }
 
 /// Move the last waypoint toward the previous one by `inset` px, so the
