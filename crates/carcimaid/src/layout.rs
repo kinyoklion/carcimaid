@@ -181,9 +181,24 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
             let h = POLY_H + extra;
             (text_w + 13.65 + h, h)
         }
-        // TODO: stadium/cylinder are path shapes; still approximated as rects.
-        NodeShape::Stadium | NodeShape::Cylinder => (text_w + 60.0, NODE_HEIGHT + extra),
+        // TODO: stadium is a path shape; still approximated as a rounded rect.
+        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
+        // Cylinder (`[(db)]`): a 3D database shape. mermaid sizes it
+        // w = text + padding(15); ry = (w/2)/(2.5 + w/50); the drawn height is
+        // the label bbox (19 for one line, +17.6 per extra) plus padding(15)
+        // plus 3·ry (the top and bottom ellipse caps). See render::render_shape.
+        NodeShape::Cylinder => {
+            let w = text_w + 15.0;
+            let ry = cylinder_ry(w);
+            (w, 19.0 + extra + 15.0 + 3.0 * ry)
+        }
     }
+}
+
+/// The elliptical cap radius `ry` of a cylinder of total width `w`, matching
+/// mermaid's `rx / (2.5 + w/50)` with `rx = w/2`.
+pub fn cylinder_ry(w: f64) -> f64 {
+    (w / 2.0) / (2.5 + w / 50.0)
 }
 
 fn rank_dir(dir: Direction) -> RankDir {

@@ -456,14 +456,30 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
         }
         NodeShape::Cylinder => {
-            // mermaid's `datastore` is a rect whose stroke-dasharray "{w} {h}"
-            // draws only the top and bottom edges, leaving the sides open.
-            let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+            // mermaid's `[(db)]` is a 3D cylinder path: full top ellipse (two
+            // arcs), body sides, and the bottom front ellipse arc. `ry` is the
+            // cap radius; the body height is the total minus the two caps.
+            let w = node.width;
+            let ry = crate::layout::cylinder_ry(w);
+            let rx = w / 2.0;
+            let body = node.height - 2.0 * ry;
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container"{st} x="{}" y="{}" width="{}" height="{}" stroke-dasharray="{} {}"/>"#,
-                round(-hw), round(-hh), round(node.width), round(node.height),
-                round(node.width), round(node.height),
+                concat!(
+                    r#"<path{st} d="M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0 "#,
+                    r#"l0,{body} a{rx},{ry} 0,0,0 {w},0 l0,{nbody}" "#,
+                    r#"class="basic label-container outer-path" label-offset-y="{ry}" "#,
+                    r#"transform="translate({tx}, {ty})"/>"#,
+                ),
+                st = st,
+                ry = round(ry),
+                rx = round(rx),
+                w = round(w),
+                nw = round(-w),
+                body = round(body),
+                nbody = round(-body),
+                tx = round(-w / 2.0),
+                ty = round(-node.height / 2.0),
             );
         }
     }
