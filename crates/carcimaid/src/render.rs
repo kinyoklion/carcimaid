@@ -114,36 +114,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     //    comparator ignores <style> text, so this adds no structural diff.
     s.push_str(&style_block());
 
-    // 2. wrapper <g> with markers + g.root
+    // 2. wrapper <g> with markers + the (possibly nested) g.root tree.
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
-    s.push_str(r#"<g class="root">"#);
-
-    s.push_str(r#"<g class="clusters">"#);
-    for cluster in &chart.clusters {
-        render_cluster(&mut s, cluster);
-    }
-    s.push_str("</g>");
-
-    s.push_str(r#"<g class="edgePaths">"#);
-    for edge in &chart.edges {
-        render_edge_path(&mut s, edge, &chart.nodes);
-    }
-    s.push_str("</g>");
-
-    s.push_str(r#"<g class="edgeLabels">"#);
-    for edge in &chart.edges {
-        render_edge_label(&mut s, edge, &chart.nodes);
-    }
-    s.push_str("</g>");
-
-    s.push_str(r#"<g class="nodes">"#);
-    for node in &chart.nodes {
-        render_node(&mut s, node);
-    }
-    s.push_str("</g>");
-
-    s.push_str("</g></g>"); // close g.root and wrapper g
+    render_scope(&mut s, chart, None);
+    s.push_str("</g>"); // close wrapper g
 
     // 3. drop-shadow filter defs (verbatim mermaid).
     let _ = write!(
@@ -192,6 +167,59 @@ fn style_block() -> String {
         "SVGID .arrowMarkerPath{fill:#333;stroke:#333;}",
     );
     format!("<style>{}</style>", CSS.replace("SVGID", &format!("#{ID}")))
+}
+
+/// Emit one layout scope's `g.root` (clusters, edgePaths, edgeLabels, nodes).
+/// `owner` is `None` for the diagram root, or a subgraph index for a separately
+/// laid-out (extracted) subgraph. Extracted child subgraphs are emitted as
+/// nested `g.root` groups inside this scope's `nodes` group, mirroring mermaid.
+fn render_scope(s: &mut String, chart: &LaidOutFlowchart, owner: Option<usize>) {
+    // A nested (extracted-subgraph) root carries mermaid's identity transform;
+    // our coordinates are already absolute, so it is a no-op we emit for parity.
+    if owner.is_some() {
+        s.push_str(r#"<g class="root" transform="translate(0, 0)">"#);
+    } else {
+        s.push_str(r#"<g class="root">"#);
+    }
+
+    s.push_str(r#"<g class="clusters">"#);
+    for cluster in &chart.clusters {
+        // An extracted subgraph draws its own rect in its own scope; an inline
+        // cluster draws in the scope it belongs to.
+        let here = if cluster.extracted {
+            Some(cluster.sg_index) == owner
+        } else {
+            cluster.home == owner
+        };
+        if here {
+            render_cluster(s, cluster);
+        }
+    }
+    s.push_str("</g>");
+
+    s.push_str(r#"<g class="edgePaths">"#);
+    for edge in chart.edges.iter().filter(|e| e.home == owner) {
+        render_edge_path(s, edge, &chart.nodes);
+    }
+    s.push_str("</g>");
+
+    s.push_str(r#"<g class="edgeLabels">"#);
+    for edge in chart.edges.iter().filter(|e| e.home == owner) {
+        render_edge_label(s, edge, &chart.nodes);
+    }
+    s.push_str("</g>");
+
+    s.push_str(r#"<g class="nodes">"#);
+    for node in chart.nodes.iter().filter(|n| n.home == owner) {
+        render_node(s, node);
+    }
+    // Nested extracted subgraphs belonging to this scope.
+    for cluster in chart.clusters.iter().filter(|c| c.extracted && c.home == owner) {
+        render_scope(s, chart, Some(cluster.sg_index));
+    }
+    s.push_str("</g>");
+
+    s.push_str("</g>"); // close g.root
 }
 
 fn render_cluster(s: &mut String, cluster: &PlacedCluster) {

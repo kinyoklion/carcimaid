@@ -47,6 +47,13 @@ pub struct PlacedCluster {
     pub cy: f64,
     pub width: f64,
     pub height: f64,
+    /// Index of this subgraph (for scope recursion in the renderer).
+    pub sg_index: usize,
+    /// Whether this subgraph is laid out separately (transposed direction). Such
+    /// clusters render as a nested `g.root` under their parent scope's nodes.
+    pub extracted: bool,
+    /// The enclosing extracted subgraph (render scope), or `None` for the root.
+    pub home: Option<usize>,
 }
 
 /// A node with a center position and a box size.
@@ -60,6 +67,8 @@ pub struct PlacedNode {
     pub cy: f64,
     pub width: f64,
     pub height: f64,
+    /// The enclosing extracted subgraph (render scope), or `None` for the root.
+    pub home: Option<usize>,
 }
 
 /// An edge routed as a polyline through `points` (dagre's waypoints, from the
@@ -74,6 +83,8 @@ pub struct PlacedEdge {
     pub arrow: bool,
     /// Dagre-computed label position (center), if the edge has a label.
     pub label_pos: Option<(f64, f64)>,
+    /// The enclosing extracted subgraph (render scope), or `None` for the root.
+    pub home: Option<usize>,
 }
 
 // --- mermaid layout parameters (its flowchart defaults). ---
@@ -160,6 +171,273 @@ fn rank_dir(dir: Direction) -> RankDir {
     }
 }
 
+// --- Subgraph direction (mermaid's separately-laid-out subgraphs). ---
+// mermaid lays a subgraph out on its own — with a transposed/explicit direction
+// — only when no edge crosses its boundary ("no external connections"); those
+// get `ranksep += 25` and a padded cluster box. Subgraphs an edge enters/leaves
+// stay inline in the parent's compound layout (the default path below), which
+// already matches mermaid. This mirrors mermaid's dagre-wrapper `extractor` +
+// `recursiveRender`.
+const SUBGRAPH_RANKSEP_INC: f64 = 25.0;
+/// Cluster padding perpendicular to the flow, per side ((nodesep + edgesep)/2).
+const CLUSTER_CROSS_PAD: f64 = (NODE_SEP + EDGE_SEP) / 2.0;
+
+fn is_horizontal(d: Direction) -> bool {
+    matches!(d, Direction::LeftRight | Direction::RightLeft)
+}
+
+/// Direction a separately-laid-out subgraph uses: explicit, else transposed
+/// from the parent (`TB -> LR`, anything else -> `TB`).
+fn subgraph_dir(sg: &crate::ir::Subgraph, parent: Direction) -> Direction {
+    sg.direction.unwrap_or(if matches!(parent, Direction::TopBottom) {
+        Direction::LeftRight
+    } else {
+        Direction::TopBottom
+    })
+}
+
+/// The subgraphs containing `node`, innermost first.
+fn node_ancestors(chart: &Flowchart, n: usize) -> Vec<usize> {
+    let mut v = Vec::new();
+    let mut cur = chart.nodes[n].subgraph;
+    while let Some(sg) = cur {
+        v.push(sg);
+        cur = chart.subgraphs[sg].parent;
+    }
+    v
+}
+
+/// Which subgraphs are laid out separately: those with no edge having exactly
+/// one endpoint as an interior descendant node (no boundary-crossing edge).
+fn compute_extracted(chart: &Flowchart) -> Vec<bool> {
+    let mut ext = vec![true; chart.subgraphs.len()];
+    for e in &chart.edges {
+        let (fa, ta) = (node_ancestors(chart, e.from), node_ancestors(chart, e.to));
+        for (sg, ext) in ext.iter_mut().enumerate() {
+            if fa.contains(&sg) != ta.contains(&sg) {
+                *ext = false;
+            }
+        }
+    }
+    ext
+}
+
+/// Deepest extracted subgraph containing node `n` (its layout "home"), or `None`.
+fn home_node(chart: &Flowchart, ext: &[bool], n: usize) -> Option<usize> {
+    node_ancestors(chart, n).into_iter().find(|&sg| ext[sg])
+}
+
+/// Deepest extracted subgraph strictly containing subgraph `s`, or `None`.
+fn home_sg(chart: &Flowchart, ext: &[bool], s: usize) -> Option<usize> {
+    let mut cur = chart.subgraphs[s].parent;
+    while let Some(sg) = cur {
+        if ext[sg] {
+            return Some(sg);
+        }
+        cur = chart.subgraphs[sg].parent;
+    }
+    None
+}
+
+/// Geometry of one layout scope (the root or a separately-laid-out subgraph), in
+/// its own dagre frame; `minx/miny/w/h` bound its content so a parent can place it.
+#[derive(Default)]
+struct Scope {
+    nodes: Vec<(usize, f64, f64)>,
+    clusters: Vec<(usize, f64, f64, f64, f64)>,
+    edges: Vec<(usize, Vec<(f64, f64)>)>,
+    minx: f64,
+    miny: f64,
+    w: f64,
+    h: f64,
+}
+
+/// Lay out one scope: its direct nodes, inline (non-extracted) subgraphs as
+/// compound clusters, and extracted child subgraphs as pre-sized collapsed
+/// nodes whose contents are then offset into place.
+fn layout_scope(
+    chart: &Flowchart,
+    sizes: &[(f64, f64)],
+    ext: &[bool],
+    owner: Option<usize>,
+    dir: Direction,
+    ranksep: f64,
+) -> Scope {
+    use std::collections::HashMap;
+    // Recursively lay out extracted child subgraphs to get their collapsed sizes.
+    let mut sub: HashMap<usize, Scope> = HashMap::new();
+    let mut collapsed: HashMap<usize, (f64, f64)> = HashMap::new();
+    for s in 0..chart.subgraphs.len() {
+        if home_sg(chart, ext, s) == owner && ext[s] {
+            let sdir = subgraph_dir(&chart.subgraphs[s], dir);
+            let child_ranksep = ranksep + SUBGRAPH_RANKSEP_INC;
+            let sc = layout_scope(chart, sizes, ext, Some(s), sdir, child_ranksep);
+            let rank_pad = child_ranksep / 2.0;
+            let (pad_x, pad_y) = if is_horizontal(sdir) {
+                (rank_pad, CLUSTER_CROSS_PAD)
+            } else {
+                (CLUSTER_CROSS_PAD, rank_pad)
+            };
+            collapsed.insert(s, (sc.w + 2.0 * pad_x, sc.h + 2.0 * pad_y));
+            sub.insert(s, sc);
+        }
+    }
+
+    let mut g: Graph<NodeLabel, EdgeLabel> =
+        Graph::with_options(GraphOptions { directed: true, multigraph: true, compound: true });
+
+    for n in 0..chart.nodes.len() {
+        if home_node(chart, ext, n) == owner {
+            let (w, h) = sizes[n];
+            g.set_node(format!("n{n}"), Some(NodeLabel { width: w, height: h, ..Default::default() }));
+        }
+    }
+    for s in 0..chart.subgraphs.len() {
+        if home_sg(chart, ext, s) != owner {
+            continue;
+        }
+        if ext[s] {
+            let (cw, ch) = collapsed[&s];
+            g.set_node(format!("s{s}"), Some(NodeLabel { width: cw, height: ch, ..Default::default() }));
+        } else {
+            g.set_node(format!("c{s}"), Some(NodeLabel::default()));
+        }
+    }
+    // Compound parent: a member's enclosing subgraph, when that is an inline
+    // (non-extracted) member of this same scope.
+    let parent_key = |parent: Option<usize>| match parent {
+        Some(p) if home_sg(chart, ext, p) == owner && !ext[p] => Some(format!("c{p}")),
+        _ => None,
+    };
+    for n in 0..chart.nodes.len() {
+        if home_node(chart, ext, n) == owner {
+            if let Some(pk) = parent_key(chart.nodes[n].subgraph) {
+                g.set_parent(&format!("n{n}"), Some(&pk));
+            }
+        }
+    }
+    for s in 0..chart.subgraphs.len() {
+        if home_sg(chart, ext, s) != owner {
+            continue;
+        }
+        let key = if ext[s] { format!("s{s}") } else { format!("c{s}") };
+        if let Some(pk) = parent_key(chart.subgraphs[s].parent) {
+            g.set_parent(&key, Some(&pk));
+        }
+    }
+    for (i, e) in chart.edges.iter().enumerate() {
+        if home_node(chart, ext, e.from) == owner && home_node(chart, ext, e.to) == owner {
+            let (lw, lh) = match &e.label {
+                Some(l) => (crate::text::measure_width(l, FONT_SIZE), crate::text::line_height(FONT_SIZE)),
+                None => (0.0, 0.0),
+            };
+            g.set_edge(
+                format!("n{}", e.from),
+                format!("n{}", e.to),
+                Some(EdgeLabel { width: lw, height: lh, ..Default::default() }),
+                Some(i.to_string().as_str()),
+            );
+        }
+    }
+
+    dagre_layout(
+        &mut g,
+        Some(LayoutOptions {
+            rankdir: rank_dir(dir),
+            nodesep: NODE_SEP,
+            ranksep,
+            edgesep: EDGE_SEP,
+            marginx: MARGIN,
+            marginy: MARGIN,
+            tie_keep_first: true,
+            ..Default::default()
+        }),
+    );
+
+    let mut out = Scope::default();
+    for n in 0..chart.nodes.len() {
+        if home_node(chart, ext, n) == owner {
+            let node = g.node(&format!("n{n}"));
+            out.nodes.push((n, node.and_then(|x| x.x).unwrap_or(0.0), node.and_then(|x| x.y).unwrap_or(0.0)));
+        }
+    }
+    for s in 0..chart.subgraphs.len() {
+        if home_sg(chart, ext, s) != owner {
+            continue;
+        }
+        if ext[s] {
+            let node = g.node(&format!("s{s}"));
+            let px = node.and_then(|x| x.x).unwrap_or(0.0);
+            let py = node.and_then(|x| x.y).unwrap_or(0.0);
+            let (cw, ch) = collapsed[&s];
+            out.clusters.push((s, px, py, cw, ch));
+            // Place the subgraph's contents: centre its content bbox on (px, py).
+            let sc = &sub[&s];
+            let ox = px - sc.w / 2.0 - sc.minx;
+            let oy = py - sc.h / 2.0 - sc.miny;
+            for &(ni, x, y) in &sc.nodes {
+                out.nodes.push((ni, x + ox, y + oy));
+            }
+            for &(s2, cx, cy, w, h) in &sc.clusters {
+                out.clusters.push((s2, cx + ox, cy + oy, w, h));
+            }
+            for (e2, pts) in &sc.edges {
+                out.edges.push((*e2, pts.iter().map(|&(x, y)| (x + ox, y + oy)).collect()));
+            }
+        } else {
+            let node = g.node(&format!("c{s}"));
+            out.clusters.push((
+                s,
+                node.and_then(|x| x.x).unwrap_or(0.0),
+                node.and_then(|x| x.y).unwrap_or(0.0),
+                node.map(|x| x.width).unwrap_or(0.0),
+                node.map(|x| x.height).unwrap_or(0.0),
+            ));
+        }
+    }
+    for (i, e) in chart.edges.iter().enumerate() {
+        if home_node(chart, ext, e.from) == owner && home_node(chart, ext, e.to) == owner {
+            if let Some(el) = g.edge(&format!("n{}", e.from), &format!("n{}", e.to), Some(&i.to_string())) {
+                let pts: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
+                if !pts.is_empty() {
+                    out.edges.push((i, pts));
+                }
+            }
+        }
+    }
+
+    let (mut mnx, mut mny, mut mxx, mut mxy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for &(n, cx, cy) in &out.nodes {
+        let (w, h) = sizes[n];
+        mnx = mnx.min(cx - w / 2.0);
+        mny = mny.min(cy - h / 2.0);
+        mxx = mxx.max(cx + w / 2.0);
+        mxy = mxy.max(cy + h / 2.0);
+    }
+    for &(_, cx, cy, w, h) in &out.clusters {
+        mnx = mnx.min(cx - w / 2.0);
+        mny = mny.min(cy - h / 2.0);
+        mxx = mxx.max(cx + w / 2.0);
+        mxy = mxy.max(cy + h / 2.0);
+    }
+    for (_, pts) in &out.edges {
+        for &(x, y) in pts {
+            mnx = mnx.min(x);
+            mny = mny.min(y);
+            mxx = mxx.max(x);
+            mxy = mxy.max(y);
+        }
+    }
+    if mnx > mxx {
+        (mnx, mny, mxx, mxy) = (0.0, 0.0, 0.0, 0.0);
+    }
+    out.minx = mnx;
+    out.miny = mny;
+    out.w = mxx - mnx;
+    out.h = mxy - mny;
+    out
+}
+
 fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     // Our node sizes (used both as dagre input and as the rendered box sizes).
     let sizes: Vec<(f64, f64)> = chart
@@ -184,119 +462,63 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         };
     }
 
-    let mut g: Graph<NodeLabel, EdgeLabel> = Graph::with_options(GraphOptions {
-        directed: true,
-        multigraph: true,
-        compound: true,
-    });
+    let ext = compute_extracted(chart);
+    let scope = layout_scope(chart, &sizes, &ext, None, chart.direction, RANK_SEP);
 
-    for (i, &(w, h)) in sizes.iter().enumerate() {
-        g.set_node(
-            i.to_string(),
-            Some(NodeLabel { width: w, height: h, ..Default::default() }),
-        );
-    }
-    // Register subgraph clusters and the compound parent relationships.
-    for ci in 0..chart.subgraphs.len() {
-        g.set_node(cluster_key(ci), Some(NodeLabel::default()));
-    }
-    for (ci, sg) in chart.subgraphs.iter().enumerate() {
-        if let Some(p) = sg.parent {
-            g.set_parent(&cluster_key(ci), Some(&cluster_key(p)));
-        }
-    }
-    for (ni, node) in chart.nodes.iter().enumerate() {
-        if let Some(ci) = node.subgraph {
-            g.set_parent(&ni.to_string(), Some(&cluster_key(ci)));
-        }
-    }
-    for (i, e) in chart.edges.iter().enumerate() {
-        // Reserve space for an edge label so dagre routes around it, matching
-        // mermaid. Unlabelled edges contribute no label box.
-        let (lw, lh) = match &e.label {
-            Some(l) => (crate::text::measure_width(l, FONT_SIZE), crate::text::line_height(FONT_SIZE)),
-            None => (0.0, 0.0),
-        };
-        g.set_edge(
-            e.from.to_string(),
-            e.to.to_string(),
-            Some(EdgeLabel { width: lw, height: lh, ..Default::default() }),
-            Some(i.to_string().as_str()),
-        );
-    }
-
-    dagre_layout(
-        &mut g,
-        Some(LayoutOptions {
-            rankdir: rank_dir(chart.direction),
-            nodesep: NODE_SEP,
-            ranksep: RANK_SEP,
-            edgesep: EDGE_SEP,
-            marginx: MARGIN,
-            marginy: MARGIN,
-            tie_keep_first: true,
-            ..Default::default()
-        }),
-    );
-
-    let nodes: Vec<PlacedNode> = chart
+    let nodes: Vec<PlacedNode> = scope
         .nodes
         .iter()
-        .enumerate()
-        .map(|(i, node)| {
-            let placed = g.node(&i.to_string());
+        .map(|&(i, cx, cy)| {
             let (w, h) = sizes[i];
             PlacedNode {
-                id: node.id.clone(),
-                label: node.label.clone(),
-                shape: node.shape,
-                cx: placed.and_then(|n| n.x).unwrap_or(0.0),
-                cy: placed.and_then(|n| n.y).unwrap_or(0.0),
+                id: chart.nodes[i].id.clone(),
+                label: chart.nodes[i].label.clone(),
+                shape: chart.nodes[i].shape,
+                cx,
+                cy,
                 width: w,
                 height: h,
+                home: home_node(chart, &ext, i),
             }
         })
         .collect();
+    // PlacedEdge endpoints index into `nodes`, whose order follows scope traversal.
+    let mut node_at = vec![0usize; chart.nodes.len()];
+    for (pi, &(i, ..)) in scope.nodes.iter().enumerate() {
+        node_at[i] = pi;
+    }
 
-    let edges: Vec<PlacedEdge> = chart
+    let edges: Vec<PlacedEdge> = scope
         .edges
         .iter()
-        .enumerate()
-        .map(|(i, e)| {
-            let el = g.edge(&e.from.to_string(), &e.to.to_string(), Some(&i.to_string()));
-            let points = el
-                .map(|el| el.points.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>())
-                .filter(|p| !p.is_empty())
-                .unwrap_or_else(|| vec![(nodes[e.from].cx, nodes[e.from].cy), (nodes[e.to].cx, nodes[e.to].cy)]);
-            // mermaid places the edge label at the midpoint of the edge path by
-            // arc length (not at dagre's reserved label slot, which sits off the
-            // path).
-            let label_pos = e.label.as_ref().map(|_| midpoint_by_length(&points));
+        .map(|(i, points)| {
+            let e = &chart.edges[*i];
+            let label_pos = e.label.as_ref().map(|_| midpoint_by_length(points));
             PlacedEdge {
-                from: e.from,
-                to: e.to,
+                from: node_at[e.from],
+                to: node_at[e.to],
                 label: e.label.clone(),
-                points,
+                points: points.clone(),
                 arrow: e.arrow,
                 label_pos,
+                home: home_node(chart, &ext, e.from),
             }
         })
         .collect();
 
-    let clusters: Vec<PlacedCluster> = chart
-        .subgraphs
+    let clusters: Vec<PlacedCluster> = scope
+        .clusters
         .iter()
-        .enumerate()
-        .map(|(ci, sg)| {
-            let n = g.node(&cluster_key(ci));
-            PlacedCluster {
-                id: sg.id.clone(),
-                title: sg.title.clone(),
-                cx: n.and_then(|n| n.x).unwrap_or(0.0),
-                cy: n.and_then(|n| n.y).unwrap_or(0.0),
-                width: n.map(|n| n.width).unwrap_or(0.0),
-                height: n.map(|n| n.height).unwrap_or(0.0),
-            }
+        .map(|&(s, cx, cy, w, h)| PlacedCluster {
+            id: chart.subgraphs[s].id.clone(),
+            title: chart.subgraphs[s].title.clone(),
+            cx,
+            cy,
+            width: w,
+            height: h,
+            sg_index: s,
+            extracted: ext[s],
+            home: home_sg(chart, &ext, s),
         })
         .collect();
 
@@ -345,11 +567,6 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     }
 }
 
-/// dagre node key for the subgraph at index `i` (kept distinct from node keys,
-/// which are plain indices).
-fn cluster_key(i: usize) -> String {
-    format!("cluster{i}")
-}
 
 /// The point at 50% of a polyline's arc length — where mermaid places edge labels.
 fn midpoint_by_length(points: &[(f64, f64)]) -> (f64, f64) {

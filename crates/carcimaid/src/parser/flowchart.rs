@@ -53,10 +53,15 @@ pub fn parse(source: &str) -> Result<Flowchart> {
         if let Some(rest) = subgraph_header(stmt) {
             let parent = stack.last().copied();
             let (id, title) = parse_subgraph_header(rest, chart.subgraphs.len());
-            chart.subgraphs.push(Subgraph { id, title, parent });
+            chart.subgraphs.push(Subgraph { id, title, parent, direction: None });
             stack.push(chart.subgraphs.len() - 1);
         } else if stmt == "end" {
             stack.pop();
+        } else if let Some(dir) = stmt.strip_prefix("direction").filter(|r| r.starts_with(char::is_whitespace)) {
+            // `direction XX` inside a subgraph sets that subgraph's direction.
+            if let (Some(&top), Some(d)) = (stack.last(), parse_direction(dir.trim())) {
+                chart.subgraphs[top].direction = Some(d);
+            }
         } else if is_directive_stmt(stmt) {
             // Styling/interaction directives (`classDef`, `class`, `style`,
             // `linkStyle`, `click`) and `direction` are not nodes/edges; skip

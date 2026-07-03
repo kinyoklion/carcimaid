@@ -58,6 +58,9 @@ pub struct Subgraph {
     pub title: String,
     /// Index into [`Flowchart::subgraphs`] of the enclosing subgraph, if nested.
     pub parent: Option<usize>,
+    /// Explicit `direction` set inside the subgraph. `None` means mermaid picks
+    /// one transposed from the parent (only for subgraphs it lays out separately).
+    pub direction: Option<Direction>,
 }
 
 /// The outline shape of a flowchart node, selected by mermaid's bracket syntax.
