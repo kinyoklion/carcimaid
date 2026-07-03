@@ -153,6 +153,17 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
     render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0));
+    // Colour-matched arrow markers for stroke-coloured edges (unique colours,
+    // first-seen order) — mermaid appends these after g.root in the wrapper.
+    let mut seen: Vec<&str> = Vec::new();
+    for e in &chart.edges {
+        if let Some(c) = e.stroke.as_deref() {
+            if !seen.contains(&c) {
+                seen.push(c);
+                s.push_str(&markers::colored_point_end(ID, c));
+            }
+        }
+    }
     s.push_str("</g>"); // close wrapper g
 
     // 3. drop-shadow filter defs (verbatim mermaid).
@@ -499,8 +510,10 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
         clip_end(&mut points, ARROW_INSET);
     }
     let d = curve_basis(&points);
+    // A stroke-coloured edge uses a colour-matched arrow marker variant.
     let marker = if edge.arrow {
-        format!(r#" marker-end="url(#{ID}_flowchart-v2-pointEnd)""#)
+        let suffix = edge.stroke.as_deref().map(|c| format!("_{c}")).unwrap_or_default();
+        format!(r#" marker-end="url(#{ID}_flowchart-v2-pointEnd{suffix})""#)
     } else {
         String::new()
     };
@@ -508,11 +521,12 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
         s,
         concat!(
             r#"<path id="{id}-{eid}" "#,
-            r#"class="edge-thickness-normal edge-pattern-solid flowchart-link" "#,
+            r#"class="edge-thickness-normal edge-pattern-solid flowchart-link"{st} "#,
             r#"d="{d}" data-edge="true" data-et="edge" data-id="{eid}" data-look="classic"{marker}/>"#,
         ),
         id = ID,
         eid = edge_id(edge, nodes),
+        st = style_attr(&edge.style),
         d = d,
         marker = marker,
     );

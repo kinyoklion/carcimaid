@@ -101,6 +101,11 @@ pub struct PlacedEdge {
     pub arrow: bool,
     /// Dagre-computed label position (center), if the edge has a label.
     pub label_pos: Option<(f64, f64)>,
+    /// Inline `style` for the edge path (resolved from `linkStyle`), or empty.
+    pub style: String,
+    /// Edge stroke colour (from `linkStyle`), which selects a colour-matched
+    /// arrow marker. `None` for the default marker.
+    pub stroke: Option<String>,
     /// The enclosing extracted subgraph (render scope), or `None` for the root.
     pub home: Option<usize>,
 }
@@ -531,6 +536,21 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         .map(|(i, points)| {
             let e = &chart.edges[*i];
             let label_pos = e.label.as_ref().map(|_| midpoint_by_length(points));
+            // Resolve linkStyle: the path style is the declarations plus fill:none;
+            // the stroke value selects a colour-matched arrow marker.
+            let (style, stroke) = if e.link_style.is_empty() {
+                (String::new(), None)
+            } else {
+                let stroke = e
+                    .link_style
+                    .iter()
+                    .find_map(|d| d.strip_prefix("stroke:").map(|v| v.trim().to_string()));
+                let mut decls = e.link_style.clone();
+                if !decls.iter().any(|d| d.trim_start().starts_with("fill:")) {
+                    decls.push("fill:none".into());
+                }
+                (decls.join(";"), stroke)
+            };
             PlacedEdge {
                 from: node_at[e.from],
                 to: node_at[e.to],
@@ -538,6 +558,8 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
                 points: points.clone(),
                 arrow: e.arrow,
                 label_pos,
+                style,
+                stroke,
                 home: home_node(chart, &ext, e.from),
             }
         })

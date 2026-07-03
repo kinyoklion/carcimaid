@@ -10,6 +10,22 @@ pub fn block(id: &str) -> String {
     TEMPLATE.replace("{ID}", id)
 }
 
+/// A colour-matched `pointEnd` marker variant for a stroke-coloured edge — the
+/// default end arrow with the colour applied and an id suffixed by the colour,
+/// exactly as mermaid emits for `linkStyle stroke:<colour>`.
+pub fn colored_point_end(id: &str, color: &str) -> String {
+    format!(
+        concat!(
+            r#"<marker id="{id}_flowchart-v2-pointEnd_{color}" class="marker flowchart-v2" "#,
+            r#"viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" "#,
+            r#"markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" "#,
+            r#"style="stroke-width: 1; stroke-dasharray: 1, 0;" stroke="{color}" fill="{color}"/></marker>"#,
+        ),
+        id = id,
+        color = color,
+    )
+}
+
 const TEMPLATE: &str = concat!(
     r#"<marker id="{ID}_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker>"#,
     r#"<marker id="{ID}_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker>"#,

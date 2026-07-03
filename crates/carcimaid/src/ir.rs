@@ -140,4 +140,6 @@ pub struct Edge {
     pub style: EdgeStyle,
     /// Whether the edge draws an arrowhead at the `to` end.
     pub arrow: bool,
+    /// `linkStyle` CSS declarations (`k:v`) applied to this edge.
+    pub link_style: Vec<String>,
 }

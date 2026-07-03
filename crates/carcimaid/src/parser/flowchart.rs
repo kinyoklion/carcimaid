@@ -77,6 +77,8 @@ pub fn parse(source: &str) -> Result<Flowchart> {
             parse_class_apply(rest, &mut chart);
         } else if let Some(rest) = strip_kw(stmt, "style") {
             parse_style(rest, &mut chart);
+        } else if let Some(rest) = strip_kw(stmt, "linkStyle") {
+            parse_link_style(rest, &mut chart);
         } else if is_directive_stmt(stmt) {
             // Styling/interaction directives (`classDef`, `class`, `style`,
             // `linkStyle`, `click`) and `direction` are not nodes/edges; skip
@@ -207,6 +209,33 @@ fn parse_style(rest: &str, chart: &mut Flowchart) {
     }
 }
 
+/// `linkStyle <default|indices> <props>` — style specific edges (by 0-based
+/// index) or all edges (`default`). `interpolate ...` clauses are ignored.
+fn parse_link_style(rest: &str, chart: &mut Flowchart) {
+    let Some((spec, props)) = rest.split_once(char::is_whitespace) else {
+        return;
+    };
+    // Drop a trailing `interpolate <fn>` clause if present before the props.
+    let props = props.strip_prefix("interpolate").map_or(props, |r| {
+        r.trim_start().split_once(char::is_whitespace).map_or("", |(_, p)| p)
+    });
+    let decls = split_css(props);
+    if decls.is_empty() {
+        return;
+    }
+    if spec.trim() == "default" {
+        for e in &mut chart.edges {
+            e.link_style = decls.clone();
+        }
+    } else {
+        for idx in spec.split(',').filter_map(|i| i.trim().parse::<usize>().ok()) {
+            if let Some(e) = chart.edges.get_mut(idx) {
+                e.link_style = decls.clone();
+            }
+        }
+    }
+}
+
 /// Add a class name to a node (or subgraph) by id.
 fn add_class(chart: &mut Flowchart, id: &str, name: &str) {
     if let Some(idx) = chart.node_index(id) {
@@ -272,6 +301,7 @@ fn parse_statement(stmt: &str, chart: &mut Flowchart, current: Option<usize>) {
                     label: op.label.clone(),
                     style: op.style,
                     arrow: op.arrow,
+                    link_style: Vec::new(),
                 });
             }
         }
