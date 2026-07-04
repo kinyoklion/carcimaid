@@ -619,6 +619,15 @@ fn map_shape(name: &str) -> NodeShape {
         // The data-store symbol renders as an open-ended (dashed-side) rect, not
         // a 3D cylinder — mermaid emits `<rect stroke-dasharray="w h">`.
         "datastore" | "das" => NodeShape::DataStore,
+        "sm-circ" | "small-circle" => NodeShape::SmallCircle,
+        "dbl-circ" | "double-circle" => NodeShape::DoubleCircle,
+        "div-rect" | "div-proc" | "divided-rectangle" | "divided-process" => NodeShape::DividedRect,
+        "lin-rect" | "lined-rectangle" | "lined-process" | "lin-proc" | "shaded-process" => {
+            NodeShape::LinedProcess
+        }
+        "win-pane" | "window-pane" | "internal-storage" => NodeShape::WindowPane,
+        "st-rect" | "procs" | "processes" | "stacked-rectangle" => NodeShape::StackedRect,
+        "odd" => NodeShape::Odd,
         "lean-r" | "lean-right" | "in-out" | "lin-r" => NodeShape::Parallelogram,
         "lean-l" | "lean-left" | "out-in" | "lin-l" => NodeShape::LeanLeft,
         "trap-b" | "trapezoid" | "trapezoid-bottom" | "manual" => NodeShape::Trapezoid,

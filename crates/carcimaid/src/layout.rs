@@ -201,6 +201,21 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
             let h = POLY_H + extra;
             (text_w + 14.0 + h / 2.0, h)
         }
+        // Small start circle: fixed r=7, no label. Box 14×14.
+        NodeShape::SmallCircle => (14.0, 14.0),
+        // Double circle: outer radius = text_w/2 + padding(15); box = diameter.
+        NodeShape::DoubleCircle => {
+            let d = text_w + 30.0;
+            (d, d)
+        }
+        // Divided rectangle: width = text_w + padding(15); the box height is the
+        // label box (bbox.h + padding) grown by 20% for the divider strip.
+        NodeShape::DividedRect => (text_w + 15.0, 1.2 * (34.0 + extra)),
+        // Lined/shaded process: rect + a left frame bar. width = text_w + 2·pad +
+        // 2·FRAME_WIDTH(8); height = bbox.h + 2·pad.
+        NodeShape::LinedProcess => (text_w + 46.0, NODE_HEIGHT + extra),
+        // Window pane / stacked rect: width/height = bbox + 2·pad + rectOffset(10).
+        NodeShape::WindowPane | NodeShape::StackedRect => (text_w + 40.0, 59.0 + extra),
         // TODO: stadium is a path shape; still approximated as a rounded rect.
         NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
         // Cylinder (`[(db)]`): a 3D database shape. mermaid sizes it

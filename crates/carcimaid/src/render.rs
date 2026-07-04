@@ -490,7 +490,139 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 ty = round(-node.height / 2.0),
             );
         }
+        // Small start circle: fixed r=7, no label. mermaid emits width/height too.
+        NodeShape::SmallCircle => {
+            let _ = write!(
+                s,
+                r#"<circle class="state-start"{st} r="7" width="14" height="14"/>"#,
+            );
+        }
+        // Double circle: a `<g>` holding an outer and an inner circle (gap 5).
+        NodeShape::DoubleCircle => {
+            let outer = node.width / 2.0;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<g class="basic label-container"{st}>"#,
+                    r#"<circle class="outer-circle"{st} r="{outer}" cx="0" cy="0"/>"#,
+                    r#"<circle class="inner-circle"{st} r="{inner}" cx="0" cy="0"/></g>"#,
+                ),
+                st = st,
+                outer = round(outer),
+                inner = round(outer - 5.0),
+            );
+        }
+        // Divided rectangle: mermaid renders it via rough.js — a clean fill
+        // polygon (which we reproduce exactly) plus a sketch stroke path (seeded
+        // rough beziers, not reproducible). We emit the fill polygon.
+        NodeShape::DividedRect => {
+            let w = node.width;
+            let h_inner = node.height / 1.2;
+            let off = h_inner * 0.2;
+            let x = -w / 2.0;
+            let y = -h_inner / 2.0 - off / 2.0;
+            let pts = [
+                (x, y + off),
+                (-x, y + off),
+                (-x, -y),
+                (x, -y),
+                (x, y),
+                (-x, y),
+                (-x, y + off),
+            ];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, true, "", &st);
+            s.push_str("</g>");
+        }
+        // Lined/shaded process: rough.js fill polygon (rect + a left bar).
+        NodeShape::LinedProcess => {
+            let frame = 8.0;
+            let total_w = node.width;
+            let h = node.height;
+            let w = total_w - frame;
+            let x = frame - total_w / 2.0;
+            let y = -h / 2.0;
+            let pts = [
+                (x, y),
+                (x + w, y),
+                (x + w, y + h),
+                (x - frame, y + h),
+                (x - frame, y),
+                (x, y),
+                (x, y + h),
+            ];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, true, "", &st);
+            s.push_str("</g>");
+        }
+        // Window pane: a rough.js path; its fill is the outer rectangle only (the
+        // quadrant dividers are stroke-only, unreproducible). Wrapped in a
+        // `<g translate(5,5)>` (rectOffset/2).
+        NodeShape::WindowPane => {
+            let ro = 10.0;
+            let w = node.width - ro;
+            let h = node.height - ro;
+            let x = -w / 2.0;
+            let y = -h / 2.0;
+            let pts = [
+                (x - ro, y - ro),
+                (x + w, y - ro),
+                (x + w, y + h),
+                (x - ro, y + h),
+                (x - ro, y - ro),
+            ];
+            let _ = write!(s, r#"<g transform="translate(5, 5)" class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, false, "", &st);
+            s.push_str("</g>");
+        }
+        // Stacked rectangle: rough.js outer+inner paths; we emit the outer fill.
+        NodeShape::StackedRect => {
+            let ro = 5.0;
+            let w = node.width - 2.0 * ro;
+            let h = node.height - 2.0 * ro;
+            let x = -w / 2.0;
+            let y = -h / 2.0;
+            let pts = [
+                (x - ro, y + ro),
+                (x - ro, y + h + ro),
+                (x + w - ro, y + h + ro),
+                (x + w - ro, y + h),
+                (x + w, y + h),
+                (x + w, y + h - ro),
+                (x + w + ro, y + h - ro),
+                (x + w + ro, y - ro),
+                (x + ro, y - ro),
+                (x + ro, y),
+                (x, y),
+                (x, y + ro),
+            ];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, true, "Z", &st);
+            s.push_str("</g>");
+        }
     }
+}
+
+/// Emit a rough.js "solid" fill `<path>` for a polygon: `M x y L x y …`
+/// (space-separated). `wrapper_g` callers add the `outer-path` `<g>` themselves;
+/// otherwise the path carries the class directly (see per-shape arms). `evenodd`
+/// adds `fill-rule="evenodd"` (rc.polygon does; rc.path does not). `close`
+/// appends a closing token (e.g. "Z"). mermaid's fill path also carries
+/// `stroke="none" stroke-width="0" fill="#ECECFF"`.
+fn emit_rough_fill(s: &mut String, pts: &[(f64, f64)], evenodd: bool, close: &str, st: &str) {
+    let mut d = String::new();
+    for (i, &(x, y)) in pts.iter().enumerate() {
+        let _ = write!(d, "{}{} {}", if i == 0 { "M" } else { " L" }, round(x), round(y));
+    }
+    if !close.is_empty() {
+        d.push(' ');
+        d.push_str(close);
+    }
+    let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+    let _ = write!(
+        s,
+        r##"<path d="{d}" stroke="none" stroke-width="0" fill="#ECECFF"{rule}{st}/>"##,
+    );
 }
 
 /// Emit a `<polygon class="label-container">` from `points` with a translate and

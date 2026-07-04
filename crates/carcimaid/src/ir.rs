@@ -113,6 +113,19 @@ pub enum NodeShape {
     /// `A>text]` — the "odd"/flag shape (a rectangle with a notched left edge).
     /// mermaid draws it as a bezier `<path>`; we approximate it as a rectangle.
     Odd,
+    /// `@{shape: sm-circ}` — a small fixed-radius (r=7) filled start circle,
+    /// rendered without a label.
+    SmallCircle,
+    /// `@{shape: dbl-circ}` — a double circle (outer + inner, gap 5).
+    DoubleCircle,
+    /// `@{shape: div-rect}` — a rectangle with a divider line near the top.
+    DividedRect,
+    /// `@{shape: lin-rect}` — a lined/shaded process (rect with a left bar).
+    LinedProcess,
+    /// `@{shape: win-pane}` — a window pane (rect split into quadrants).
+    WindowPane,
+    /// `@{shape: st-rect}` — stacked rectangles (offset outlines behind a rect).
+    StackedRect,
 }
 
 /// A flowchart node.
