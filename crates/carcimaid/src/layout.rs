@@ -234,6 +234,40 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
         // Fixed-size markers (no label): junction r=7, stop 14, crossed r=30.
         NodeShape::FilledCircle | NodeShape::FramedCircle => (14.0, 14.0),
         NodeShape::CrossedCircle => (60.0, 60.0),
+        // Delay: rect + rounded right end. w/h = bbox + 2·pad.
+        NodeShape::Delay => (text_w + 30.0, NODE_HEIGHT + extra),
+        // Document family: wavy bottom adds ~25% height. lin/tag add a left line /
+        // corner tag width.
+        NodeShape::Document => (text_w + 30.0, (NODE_HEIGHT + extra) * 1.25),
+        NodeShape::LinedDocument => (text_w + 38.0, (NODE_HEIGHT + extra) * 1.25),
+        NodeShape::TaggedDocument => (text_w + 39.0, (NODE_HEIGHT + extra) * 1.25),
+        // Stacked documents: extra width/height for the offset stack.
+        NodeShape::Documents => (text_w + 50.0, (NODE_HEIGHT + extra) * 1.96),
+        // Tagged rect: bbox + 2·pad + tag fold (~TAG_RATIO·h).
+        NodeShape::TaggedRect => (text_w + 39.0, NODE_HEIGHT + extra),
+        // Bow-tie rect: bbox + 2·pad + arc sagitta; height = bbox + pad.
+        NodeShape::BowTieRect => (text_w + 35.0, POLY_H + extra),
+        // Wave rectangle (flag): wavy top+bottom grows height ~1.5×.
+        NodeShape::WaveRect => (text_w + 30.0, (POLY_H + extra) * 1.5),
+        // Text block: borderless rect, bbox + pad.
+        NodeShape::TextBlock => (text_w + 15.0, POLY_H + extra),
+        // Horizontal cylinder: wide, short; extra width for the end caps.
+        NodeShape::HorizontalCylinder => (text_w + 62.0, 40.0 + extra),
+        // Lined (disk) cylinder: like a vertical cylinder.
+        NodeShape::LinedCylinder => {
+            let w = text_w + 15.0;
+            let ry = cylinder_ry(w);
+            (w, 19.0 + extra + 15.0 + 3.0 * ry)
+        }
+        // Fork/join bar: a thin fixed rectangle. Hourglass/bolt: fixed markers.
+        NodeShape::Fork => (14.0, 70.0),
+        NodeShape::Hourglass => (30.0, 30.0),
+        NodeShape::LightningBolt => (35.0, 70.0),
+        // Callout markers that still size to their label.
+        NodeShape::Bang => (text_w + 30.0, 58.0 + extra),
+        NodeShape::Cloud => (text_w + 30.0, 52.0 + extra),
+        NodeShape::BraceLeft | NodeShape::BraceRight => (text_w + 30.0, 44.0 + extra),
+        NodeShape::Braces => (text_w + 40.0, 44.0 + extra),
         // TODO: stadium is a path shape; still approximated as a rounded rect.
         NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
         // Cylinder (`[(db)]`): a 3D database shape. mermaid sizes it

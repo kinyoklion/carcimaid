@@ -364,7 +364,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     match node.shape {
-        NodeShape::Rectangle | NodeShape::DataStore | NodeShape::Odd => {
+        NodeShape::Rectangle | NodeShape::DataStore => {
             // DataStore (`@{shape: datastore}`) is the same rect but with its
             // vertical sides dashed away: a `stroke-dasharray` of the rect's own
             // width/height draws only the top and bottom edges.
@@ -685,35 +685,264 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
         // Filled junction circle (r=7, no label). mermaid draws a rough bezier
         // path; we emit a plain circle (visually identical, correct size).
         NodeShape::FilledCircle => {
-            let _ = write!(s, r#"<circle class="outer-path"{st} r="7" cx="0" cy="0"/>"#);
+            let _ = write!(
+                s,
+                r#"<path class="outer-path"{st} d="M-7,0 a7,7 0 1 0 14,0 a7,7 0 1 0 -14,0 Z"/>"#,
+            );
         }
-        // Framed stop circle: outer (r=7) + filled inner (r=2.5).
+        // Framed stop circle: outer (r=7, as a path) + filled inner (r=2.5).
         NodeShape::FramedCircle => {
             let _ = write!(
                 s,
                 concat!(
                     r#"<g class="basic label-container"{st}>"#,
-                    r#"<circle class="outer-circle"{st} r="7" cx="0" cy="0"/>"#,
+                    r#"<path class="outer-circle"{st} d="M-7,0 a7,7 0 1 0 14,0 a7,7 0 1 0 -14,0 Z"/>"#,
                     r#"<circle class="inner-circle"{st} r="2.5" cx="0" cy="0"/></g>"#,
                 ),
                 st = st,
             );
         }
-        // Crossed circle (r=30, no label): a circle with an X across it.
+        // Crossed circle (r=30, no label): a circle (as a path) with an X across it.
         NodeShape::CrossedCircle => {
             let r = 30.0_f64;
             let d = r * (0.5_f64).sqrt(); // 45° offset for the X arms
             let _ = write!(
                 s,
                 concat!(
-                    r#"<g class="outer-path"{st}><circle{st} r="{r}" cx="0" cy="0"/>"#,
+                    r#"<g class="outer-path"{st}>"#,
+                    r#"<path{st} d="M{nr},0 a{r},{r} 0 1 0 {dd},0 a{r},{r} 0 1 0 {ndd},0 Z"/>"#,
                     r#"<path{st} d="M{a},{na} L{na},{a} M{na},{na} L{a},{a}"/></g>"#,
                 ),
                 st = st,
-                r = round(r),
+                r = round(r), nr = round(-r), dd = round(2.0 * r), ndd = round(-2.0 * r),
                 a = round(d),
                 na = round(-d),
             );
+        }
+        // Odd / flag (rect_left_inv_arrow): rectangle with a notched left edge.
+        NodeShape::Odd => {
+            let notch = -hh / 2.0; // y/2 in mermaid's frame (y = -h/2)
+            let pts = [
+                (-hw + notch, -hh),
+                (-hw, 0.0),
+                (-hw + notch, hh),
+                (hw, hh),
+                (hw, -hh),
+            ];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Delay: rectangle with a rounded right end (radius = h/2).
+        NodeShape::Delay => {
+            let r = hh;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} "#,
+                    r#"L{rx},{ny} A{r},{r} 0 0 1 {rx},{hh} L{nx},{hh} Z"/>"#,
+                ),
+                st = st, nx = round(-hw), ny = round(-hh), rx = round(hw - r), r = round(r), hh = round(hh),
+            );
+        }
+        // Document / lined-document / tagged-document: rectangle with a wavy
+        // bottom edge (approximated with two cubic bows). lin/tag add a decoration.
+        NodeShape::Document | NodeShape::LinedDocument | NodeShape::TaggedDocument => {
+            let wave = node.height * 0.1;
+            let bot = hh - wave;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{x},{ny} "#,
+                    r#"L{x},{bot} C{cx1},{c1},{cx2},{c2},0,{bot} C{cx3},{c3},{cx4},{c4},{nx},{bot} Z"/>"#,
+                ),
+                st = st, nx = round(-hw), ny = round(-hh), x = round(hw), bot = round(bot),
+                cx1 = round(hw * 0.66), c1 = round(bot + wave * 2.0),
+                cx2 = round(hw * 0.33), c2 = round(bot - wave * 2.0),
+                cx3 = round(-hw * 0.33), c3 = round(bot + wave * 2.0),
+                cx4 = round(-hw * 0.66), c4 = round(bot - wave * 2.0),
+            );
+            if matches!(node.shape, NodeShape::LinedDocument) {
+                let lx = -hw + 8.0;
+                let _ = write!(s, r#"<path{st} d="M{lx},{ny} L{lx},{bot}"/>"#, st = st, lx = round(lx), ny = round(-hh), bot = round(bot));
+            }
+            if matches!(node.shape, NodeShape::TaggedDocument) {
+                let t = 12.0;
+                let _ = write!(s, r#"<path{st} d="M{x0},{y0} L{x1},{y0} L{x1},{y1}"/>"#, st = st, x0 = round(hw - t), y0 = round(hh - wave - t), x1 = round(hw), y1 = round(hh - wave));
+            }
+        }
+        // Stacked documents: two offset outlines behind a front document.
+        NodeShape::Documents => {
+            let off = node.height * 0.12;
+            let fw = hw - off;
+            let fh = hh - off;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<g class="basic label-container outer-path"{st}>"#,
+                    r#"<path{st} d="M{x2},{ny} L{xr},{ny} L{xr},{yb} L{x2},{yb} Z"/>"#,
+                    r#"<path{st} d="M{x1},{y1} L{xr1},{y1} L{xr1},{yb1} L{x1},{yb1} Z"/>"#,
+                    r#"<path{st} d="M{fnx},{fy} L{fx},{fy} L{fx},{fbot} C{c1x},{c1},{c2x},{c2},{fnx},{fbot} Z"/></g>"#,
+                ),
+                st = st,
+                x2 = round(-hw), ny = round(-hh), xr = round(-hw + 2.0 * fw), yb = round(-hh + 2.0 * fh),
+                x1 = round(-hw + off), y1 = round(-hh + off), xr1 = round(-hw + off + 2.0 * fw), yb1 = round(-hh + off + 2.0 * fh),
+                fnx = round(-fw), fy = round(-fh), fx = round(fw), fbot = round(fh - off),
+                c1x = round(fw * 0.4), c1 = round(fh + off), c2x = round(-fw * 0.4), c2 = round(fh - off),
+            );
+        }
+        // Tagged rectangle: a rectangle with a folded bottom-right corner tag.
+        NodeShape::TaggedRect => {
+            let t = node.height * 0.2;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<g class="basic label-container outer-path"{st}>"#,
+                    r#"<path{st} d="M{nx},{ny} L{hw},{ny} L{hw},{hh} L{nx},{hh} Z"/>"#,
+                    r#"<path{st} d="M{x0},{hh} L{hw},{y0} L{hw},{hh} Z"/></g>"#,
+                ),
+                st = st, nx = round(-hw), ny = round(-hh),
+                x0 = round(hw - t), hh = round(hh), hw = round(hw), y0 = round(hh - t),
+            );
+        }
+        // Bow-tie rectangle: rectangle with concave (inward-arced) left/right sides.
+        NodeShape::BowTieRect => {
+            let sag = 5.0;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{hw},{ny} "#,
+                    r#"Q{qx},0 {hw},{hh} L{nx},{hh} Q{nqx},0 {nx},{ny} Z"/>"#,
+                ),
+                st = st, nx = round(-hw), ny = round(-hh), hw = round(hw), hh = round(hh),
+                qx = round(hw - sag), nqx = round(-hw + sag),
+            );
+        }
+        // Wave rectangle (flag / paper tape): wavy top and bottom edges.
+        NodeShape::WaveRect => {
+            let wave = node.height * 0.12;
+            let top = -hh + wave;
+            let bot = hh - wave;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{top} "#,
+                    r#"C{cx1},{tc1},{cx2},{tc2},{hw},{top} L{hw},{bot} "#,
+                    r#"C{cx2},{bc1},{cx1},{bc2},{nx},{bot} Z"/>"#,
+                ),
+                st = st, nx = round(-hw), hw = round(hw), top = round(top), bot = round(bot),
+                cx1 = round(-hw * 0.33), cx2 = round(hw * 0.33),
+                tc1 = round(top - wave * 2.0), tc2 = round(top + wave * 2.0),
+                bc1 = round(bot + wave * 2.0), bc2 = round(bot - wave * 2.0),
+            );
+        }
+        // Horizontal cylinder: a cylinder lying on its side (elliptical ends).
+        NodeShape::HorizontalCylinder => {
+            let rx = hh / 2.5;
+            let body = node.width - 2.0 * rx;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{nhh} "#,
+                    r#"a{rx},{hh} 0 0 0 0,{hgt} l{body},0 a{rx},{hh} 0 0 0 0,{nhgt} "#,
+                    r#"l{nbody},0 M{x2},{nhh} a{rx},{hh} 0 0 1 0,{hgt}"/>"#,
+                ),
+                st = st, nx = round(-hw), nhh = round(-hh), rx = round(rx), hh = round(hh),
+                hgt = round(2.0 * hh), nhgt = round(-2.0 * hh), body = round(body), nbody = round(-body),
+                x2 = round(-hw + body),
+            );
+        }
+        // Lined (disk) cylinder: a vertical cylinder with an inner top-cap line.
+        NodeShape::LinedCylinder => {
+            let w = node.width;
+            let ry = crate::layout::cylinder_ry(w);
+            let rx = w / 2.0;
+            let body = node.height - 2.0 * ry;
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} d="M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0 "#,
+                    r#"l0,{body} a{rx},{ry} 0,0,0 {w},0 l0,{nbody}" "#,
+                    r#"class="basic label-container outer-path" transform="translate({tx}, {ty})"/>"#,
+                    r#"<path{st} d="M{tx},{cap} a{rx},{ry} 0,0,0 {w},0" transform="translate(0, {ty})"/>"#,
+                ),
+                st = st, ry = round(ry), rx = round(rx), w = round(w), nw = round(-w),
+                body = round(body), nbody = round(-body),
+                tx = round(-w / 2.0), ty = round(-node.height / 2.0), cap = round(2.0 * ry),
+            );
+        }
+        // Fork/join: a thin solid bar (no label), drawn as a path.
+        NodeShape::Fork => {
+            let pts = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Text block: a borderless rectangle (label only).
+        NodeShape::TextBlock => {
+            let _ = write!(
+                s,
+                r#"<rect class="label-container"{st} x="{nx}" y="{ny}" width="{w}" height="{h}"/>"#,
+                st = st, nx = round(-hw), ny = round(-hh), w = round(2.0 * hw), h = round(2.0 * hh),
+            );
+        }
+        // Hourglass (collate): two triangles meeting at the centre.
+        NodeShape::Hourglass => {
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{hw},{ny} "#,
+                    r#"L{nx},{hh} L{hw},{hh} Z"/>"#,
+                ),
+                st = st, nx = round(-hw), ny = round(-hh), hw = round(hw), hh = round(hh),
+            );
+        }
+        // Lightning bolt: a zig-zag polygon.
+        NodeShape::LightningBolt => {
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="outer-path" d="M{x0},{ny} L{x1},{y1} L{x2},{y1} "#,
+                    r#"L{x0b},{hh} L{x3},{y3} L{x4},{y3} Z"/>"#,
+                ),
+                st = st,
+                x0 = round(hw * 0.2), ny = round(-hh),
+                x1 = round(-hw * 0.6), y1 = round(node.height * 0.1),
+                x2 = round(0.0), x0b = round(-hw * 0.2), hh = round(hh),
+                x3 = round(hw * 0.6), y3 = round(-node.height * 0.1), x4 = round(0.0),
+            );
+        }
+        // Bang / cloud: approximated as an ellipse blob (element + size match).
+        NodeShape::Bang | NodeShape::Cloud => {
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<path{st} class="basic label-container outer-path" d="M{nx},0 "#,
+                    r#"a{hw},{hh} 0 1 0 {w},0 a{hw},{hh} 0 1 0 {nw},0 Z"/>"#,
+                ),
+                st = st, nx = round(-hw), hw = round(hw), hh = round(hh), w = round(2.0 * hw), nw = round(-2.0 * hw),
+            );
+        }
+        // Curly braces: a left brace, a right brace, or both around the label.
+        NodeShape::BraceLeft | NodeShape::BraceRight | NodeShape::Braces => {
+            let brace = |s: &mut String, x: f64, dir: f64| {
+                let _ = write!(
+                    s,
+                    concat!(
+                        r#"<path{st} d="M{x0},{ny} q{qb},0 {qb},{q} q0,{q} {qb2},{q} q{nqb2},0 {nqb2},{q} q0,{q} {nqb},{q}"/>"#,
+                    ),
+                    st = st, x0 = round(x), ny = round(-hh),
+                    qb = round(-6.0 * dir), q = round(hh / 2.0), qb2 = round(-6.0 * dir), nqb2 = round(6.0 * dir), nqb = round(6.0 * dir),
+                );
+            };
+            let _ = write!(s, r#"<g class="outer-path">"#);
+            if !matches!(node.shape, NodeShape::BraceRight) {
+                brace(s, -hw + 6.0, 1.0);
+            }
+            if !matches!(node.shape, NodeShape::BraceLeft) {
+                brace(s, hw - 6.0, -1.0);
+            }
+            s.push_str("</g>");
         }
     }
 }

@@ -145,6 +145,44 @@ pub enum NodeShape {
     FramedCircle,
     /// `@{shape: cross-circ}` (crossedCircle) — a circle with an X through it.
     CrossedCircle,
+    /// `@{shape: delay}` (halfRoundedRectangle) — rectangle with a rounded right end.
+    Delay,
+    /// `@{shape: doc}` (waveEdgedRectangle) — a document (wavy bottom edge).
+    Document,
+    /// `@{shape: docs}` (multiWaveEdgedRectangle) — stacked documents.
+    Documents,
+    /// `@{shape: lin-doc}` (linedWaveEdgedRect) — a document with a left line.
+    LinedDocument,
+    /// `@{shape: tag-doc}` (taggedWaveEdgedRectangle) — a document with a corner tag.
+    TaggedDocument,
+    /// `@{shape: tag-rect}` (taggedRect) — a rectangle with a folded corner tag.
+    TaggedRect,
+    /// `@{shape: bow-rect}` (bowTieRect) — a rectangle with concave (bow-tie) sides.
+    BowTieRect,
+    /// `@{shape: flag}` (waveRectangle) — a paper-tape shape (wavy top and bottom).
+    WaveRect,
+    /// `@{shape: h-cyl}` (tiltedCylinder) — a horizontal cylinder.
+    HorizontalCylinder,
+    /// `@{shape: lin-cyl}` (linedCylinder) — a lined/disk cylinder.
+    LinedCylinder,
+    /// `@{shape: fork}` (forkJoin) — a thin filled fork/join bar.
+    Fork,
+    /// `@{shape: text}` — a borderless text block (rect with class "text").
+    TextBlock,
+    /// `@{shape: bang}` — an explosion/bang callout.
+    Bang,
+    /// `@{shape: cloud}` — a cloud.
+    Cloud,
+    /// `@{shape: hourglass}` (collate) — an hourglass (two triangles).
+    Hourglass,
+    /// `@{shape: bolt}` (com-link) — a lightning bolt.
+    LightningBolt,
+    /// `@{shape: brace}` (comment) — a left curly brace.
+    BraceLeft,
+    /// `@{shape: brace-r}` — a right curly brace.
+    BraceRight,
+    /// `@{shape: braces}` — curly braces on both sides.
+    Braces,
 }
 
 /// A flowchart node.

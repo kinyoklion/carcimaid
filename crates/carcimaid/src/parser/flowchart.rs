@@ -615,7 +615,7 @@ fn map_shape(name: &str) -> NodeShape {
         "subproc" | "subprocess" | "subroutine" | "framed-rectangle" | "fr-rect" => {
             NodeShape::Subroutine
         }
-        "cyl" | "cylinder" | "database" | "db" | "disk" => NodeShape::Cylinder,
+        "cyl" | "cylinder" | "database" | "db" => NodeShape::Cylinder,
         // The data-store symbol renders as an open-ended (dashed-side) rect, not
         // a 3D cylinder — mermaid emits `<rect stroke-dasharray="w h">`.
         "datastore" | "das" => NodeShape::DataStore,
@@ -636,7 +636,26 @@ fn map_shape(name: &str) -> NodeShape {
         "f-circ" | "junction" | "filled-circle" => NodeShape::FilledCircle,
         "fr-circ" | "stop" | "framed-circle" => NodeShape::FramedCircle,
         "cross-circ" | "summary" | "crossed-circle" => NodeShape::CrossedCircle,
-        "odd" => NodeShape::Odd,
+        "odd" | "paper-tape" => NodeShape::Odd,
+        "delay" | "half-rounded-rectangle" => NodeShape::Delay,
+        "doc" | "document" => NodeShape::Document,
+        "docs" | "documents" | "st-doc" | "stacked-document" => NodeShape::Documents,
+        "lin-doc" | "lined-document" => NodeShape::LinedDocument,
+        "tag-doc" | "tagged-document" => NodeShape::TaggedDocument,
+        "tag-rect" | "tagged-rectangle" | "tag-proc" | "tagged-process" => NodeShape::TaggedRect,
+        "bow-rect" | "bow-tie-rectangle" | "stored-data" => NodeShape::BowTieRect,
+        "flag" => NodeShape::WaveRect,
+        "h-cyl" | "horizontal-cylinder" => NodeShape::HorizontalCylinder,
+        "lin-cyl" | "lined-cylinder" | "disk" => NodeShape::LinedCylinder,
+        "fork" | "join" => NodeShape::Fork,
+        "text" => NodeShape::TextBlock,
+        "bang" => NodeShape::Bang,
+        "cloud" => NodeShape::Cloud,
+        "hourglass" | "collate" => NodeShape::Hourglass,
+        "bolt" | "com-link" | "lightning-bolt" => NodeShape::LightningBolt,
+        "brace" | "comment" | "brace-l" => NodeShape::BraceLeft,
+        "brace-r" => NodeShape::BraceRight,
+        "braces" => NodeShape::Braces,
         "lean-r" | "lean-right" | "in-out" | "lin-r" => NodeShape::Parallelogram,
         "lean-l" | "lean-left" | "out-in" | "lin-l" => NodeShape::LeanLeft,
         "trap-b" | "trapezoid" | "trapezoid-bottom" | "manual" => NodeShape::Trapezoid,
