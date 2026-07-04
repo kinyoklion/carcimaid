@@ -126,6 +126,25 @@ pub enum NodeShape {
     WindowPane,
     /// `@{shape: st-rect}` — stacked rectangles (offset outlines behind a rect).
     StackedRect,
+    /// `@{shape: notch-rect}` (card) — a rectangle with a notched top-left corner.
+    /// Rendered as an exact `<polygon>` (matches mermaid's insertPolygonShape).
+    NotchedRect,
+    /// `@{shape: notch-pent}` (trapezoidalPentagon) — a pentagon (loop limit).
+    NotchedPentagon,
+    /// `@{shape: tri}` (triangle) — an upward triangle (extract).
+    Triangle,
+    /// `@{shape: flip-tri}` (flippedTriangle) — a downward triangle.
+    FlippedTriangle,
+    /// `@{shape: sl-rect}` (slopedRect) — a rectangle with a sloped top edge.
+    SlopedRect,
+    /// `@{shape: curv-trap}` (curvedTrapezoid) — a display shape (rounded right).
+    CurvedTrapezoid,
+    /// `@{shape: f-circ}` (filledCircle) — a small (r=7) solid junction circle.
+    FilledCircle,
+    /// `@{shape: fr-circ}` (stateEnd) — a framed stop circle (outer + filled inner).
+    FramedCircle,
+    /// `@{shape: cross-circ}` (crossedCircle) — a circle with an X through it.
+    CrossedCircle,
 }
 
 /// A flowchart node.

@@ -216,6 +216,24 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
         NodeShape::LinedProcess => (text_w + 46.0, NODE_HEIGHT + extra),
         // Window pane / stacked rect: width/height = bbox + 2·pad + rectOffset(10).
         NodeShape::WindowPane | NodeShape::StackedRect => (text_w + 40.0, 59.0 + extra),
+        // Notched rectangle (card): width = bbox + pad(15) + NOTCH_SIZE(12);
+        // height = bbox.h + pad. Exact `<polygon>`.
+        NodeShape::NotchedRect => (text_w + 27.0, POLY_H + extra),
+        // Notched pentagon: width/height = bbox + 2·pad(15).
+        NodeShape::NotchedPentagon => (text_w + 30.0, 49.0 + extra),
+        // Triangle / flipped triangle: mermaid w = bbox + pad(15); h = w + bbox.h.
+        // The drawn triangle base (tw) equals h, so the visual box is h×h.
+        NodeShape::Triangle | NodeShape::FlippedTriangle => {
+            let h = text_w + 15.0 + 19.0 + extra;
+            (h, h)
+        }
+        // Sloped rectangle: width = bbox + 2·pad; the drawn height spans 1.5·h.
+        NodeShape::SlopedRect => (text_w + 30.0, 1.5 * (49.0 + extra)),
+        // Curved trapezoid (display): width = (bbox + 2·pad)·1.25; height = bbox + 2·pad.
+        NodeShape::CurvedTrapezoid => ((text_w + 30.0) * 1.25, 49.0 + extra),
+        // Fixed-size markers (no label): junction r=7, stop 14, crossed r=30.
+        NodeShape::FilledCircle | NodeShape::FramedCircle => (14.0, 14.0),
+        NodeShape::CrossedCircle => (60.0, 60.0),
         // TODO: stadium is a path shape; still approximated as a rounded rect.
         NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
         // Cylinder (`[(db)]`): a 3D database shape. mermaid sizes it

@@ -600,6 +600,121 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             emit_rough_fill(s, &pts, true, "Z", &st);
             s.push_str("</g>");
         }
+        // Notched rectangle (card): an exact `<polygon>` (insertPolygonShape), a
+        // rect with a 12px notch cut from the top-left corner.
+        NodeShape::NotchedRect => {
+            let (w, h) = (node.width, node.height);
+            let n = 12.0;
+            let pts = [(n, -h), (w, -h), (w, 0.0), (0.0, 0.0), (0.0, -h + n), (n, -h)];
+            emit_polygon(s, &pts, -w / 2.0, h / 2.0, &st);
+        }
+        // Notched pentagon (loop limit): mermaid uses a rough curved path; we emit
+        // the straight fill (element + size match; the seeded stroke curve is not
+        // reproducible, leaving a `d` residual).
+        NodeShape::NotchedPentagon => {
+            let (w, h) = (node.width / 2.0, node.height / 2.0);
+            let pts = [
+                (-w * 0.8, -h),
+                (w * 0.8, -h),
+                (w, -h * 0.6),
+                (w, h),
+                (-w, h),
+                (-w, -h * 0.6),
+            ];
+            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Triangle / flipped triangle (rough curved path; straight approximation).
+        // The base `tw` equals the height; the group is translated to centre it.
+        NodeShape::Triangle | NodeShape::FlippedTriangle => {
+            let h = node.height;
+            let pts = if matches!(node.shape, NodeShape::Triangle) {
+                [(0.0, 0.0), (h, 0.0), (h / 2.0, -h)]
+            } else {
+                [(0.0, -h), (h, -h), (h / 2.0, 0.0)]
+            };
+            let _ = write!(
+                s,
+                r#"<g class="outer-path" transform="translate({}, {})">"#,
+                round(-h / 2.0),
+                round(h / 2.0),
+            );
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Sloped rectangle (rough curved path; straight approximation). The drawn
+        // height is 1.5·h (node.height); the shape body uses h = node.height/1.5.
+        NodeShape::SlopedRect => {
+            let w = node.width;
+            let h = node.height / 1.5;
+            let (x, y) = (-w / 2.0, -h / 2.0);
+            let pts = [(x, y), (x, y + h), (x + w, y + h), (x + w, y - h / 2.0)];
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container  outer-path" transform="translate(0, {})">"#,
+                round(h / 4.0),
+            );
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Curved trapezoid (display): rough curved path with an arced left edge;
+        // approximated as a straight-edged trapezoid (element + size match).
+        NodeShape::CurvedTrapezoid => {
+            let (w, h) = (node.width, node.height);
+            let radius = h / 2.0;
+            let rw = w - radius;
+            let tw = h / 4.0;
+            // Points in mermaid's [0,w]×[0,h] frame, then centred via translate.
+            let pts = [
+                (rw, 0.0),
+                (tw, 0.0),
+                (0.0, h / 2.0),
+                (tw, h),
+                (rw, h),
+            ];
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container outer-path" transform="translate({}, {})">"#,
+                round(-w / 2.0),
+                round(-h / 2.0),
+            );
+            emit_rough_fill(s, &pts, false, "Z", &st);
+            s.push_str("</g>");
+        }
+        // Filled junction circle (r=7, no label). mermaid draws a rough bezier
+        // path; we emit a plain circle (visually identical, correct size).
+        NodeShape::FilledCircle => {
+            let _ = write!(s, r#"<circle class="outer-path"{st} r="7" cx="0" cy="0"/>"#);
+        }
+        // Framed stop circle: outer (r=7) + filled inner (r=2.5).
+        NodeShape::FramedCircle => {
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<g class="basic label-container"{st}>"#,
+                    r#"<circle class="outer-circle"{st} r="7" cx="0" cy="0"/>"#,
+                    r#"<circle class="inner-circle"{st} r="2.5" cx="0" cy="0"/></g>"#,
+                ),
+                st = st,
+            );
+        }
+        // Crossed circle (r=30, no label): a circle with an X across it.
+        NodeShape::CrossedCircle => {
+            let r = 30.0_f64;
+            let d = r * (0.5_f64).sqrt(); // 45° offset for the X arms
+            let _ = write!(
+                s,
+                concat!(
+                    r#"<g class="outer-path"{st}><circle{st} r="{r}" cx="0" cy="0"/>"#,
+                    r#"<path{st} d="M{a},{na} L{na},{a} M{na},{na} L{a},{a}"/></g>"#,
+                ),
+                st = st,
+                r = round(r),
+                a = round(d),
+                na = round(-d),
+            );
+        }
     }
 }
 
