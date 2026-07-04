@@ -24,11 +24,36 @@ pub enum Direction {
     RightLeft,
 }
 
+/// The visual "look" of a diagram (mermaid frontmatter `look:`). Selects the
+/// rough.js roughness used when rendering node shapes through `roughr`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Look {
+    /// mermaid's default clean look — rough.js roughness `0` (deterministic
+    /// fill path = the exact shape vertices).
+    #[default]
+    Classic,
+    /// The hand-drawn look — rough.js roughness `0.7`.
+    HandDrawn,
+}
+
+impl Look {
+    /// The rough.js `roughness` option for this look.
+    pub fn roughness(self) -> f64 {
+        match self {
+            Look::Classic => 0.0,
+            Look::HandDrawn => 0.7,
+        }
+    }
+}
+
 /// A flowchart: a directed graph of [`Node`]s connected by [`Edge`]s, with
 /// optional [`Subgraph`] groupings.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Flowchart {
     pub direction: Direction,
+    /// Visual look (`look:` frontmatter). Selects rough.js roughness; defaults
+    /// to [`Look::Classic`]. (Frontmatter parsing is a later task.)
+    pub look: Look,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub subgraphs: Vec<Subgraph>,

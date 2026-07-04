@@ -152,7 +152,7 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
-    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0));
+    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0), chart.look.roughness());
     // Colour-matched point-arrow markers for stroke-coloured edges (unique
     // (side, colour), first-seen order) — mermaid appends these after g.root.
     let mut seen: Vec<(&str, &str)> = Vec::new();
@@ -229,6 +229,7 @@ fn render_scope(
     scope_offsets: &[(f64, f64)],
     owner: Option<usize>,
     parent_off: (f64, f64),
+    roughness: f64,
 ) {
     // A nested (extracted-subgraph) g.root carries the offset that positions its
     // (otherwise local) contents; the root g.root has no transform.
@@ -272,12 +273,12 @@ fn render_scope(
 
     s.push_str(r#"<g class="nodes">"#);
     for node in nodes.iter().filter(|n| n.home == owner) {
-        render_node(s, node);
+        render_node(s, node, roughness);
     }
     // Nested extracted subgraphs belonging to this scope (clusters are pre-sorted
     // into mermaid's render order).
     for cluster in clusters.iter().filter(|c| c.extracted && c.home == owner) {
-        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off);
+        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off, roughness);
     }
     s.push_str("</g>");
 
@@ -312,7 +313,7 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
     s.push_str("</g></g></g>");
 }
 
-fn render_node(s: &mut String, node: &PlacedNode) {
+fn render_node(s: &mut String, node: &PlacedNode, roughness: f64) {
     let _ = write!(
         s,
         r#"<g class="node default{}" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
@@ -322,7 +323,7 @@ fn render_node(s: &mut String, node: &PlacedNode) {
         round(node.cx),
         round(node.cy),
     );
-    render_shape(s, node);
+    render_shape(s, node, roughness);
     // g.label is offset up by half the label block height so the (possibly
     // multi-line) text is vertically centred, matching mermaid.
     let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0).len().max(1);
@@ -360,7 +361,7 @@ fn class_suffix(classes: &[String]) -> String {
 }
 
 /// Emit the node's outline shape, centred at the group origin.
-fn render_shape(s: &mut String, node: &PlacedNode) {
+fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     match node.shape {
@@ -512,9 +513,10 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 inner = round(outer - 5.0),
             );
         }
-        // Divided rectangle: mermaid renders it via rough.js — a clean fill
-        // polygon (which we reproduce exactly) plus a sketch stroke path (seeded
-        // rough beziers, not reproducible). We emit the fill polygon.
+        // Divided rectangle: mermaid renders it via rough.js `rc.polygon` — a
+        // fill path plus a sketch stroke path, both emitted through `roughr`
+        // (matching mermaid's dividedRectangle handler). The polygon traces the
+        // outline and doubles back along the divider line near the top.
         NodeShape::DividedRect => {
             let w = node.width;
             let h_inner = node.height / 1.2;
@@ -522,16 +524,18 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             let x = -w / 2.0;
             let y = -h_inner / 2.0 - off / 2.0;
             let pts = [
-                (x, y + off),
-                (-x, y + off),
-                (-x, -y),
-                (x, -y),
-                (x, y),
-                (-x, y),
-                (-x, y + off),
+                [x, y + off],
+                [-x, y + off],
+                [-x, -y],
+                [x, -y],
+                [x, y],
+                [-x, y],
+                [-x, y + off],
             ];
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().polygon(&pts, &o);
             let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, true, "", &st);
+            emit_rough_drawable(s, &drawable, true, &st);
             s.push_str("</g>");
         }
         // Lined/shaded process: rough.js fill polygon (rect + a left bar).
@@ -555,24 +559,27 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
             emit_rough_fill(s, &pts, true, "", &st);
             s.push_str("</g>");
         }
-        // Window pane: a rough.js path; its fill is the outer rectangle only (the
-        // quadrant dividers are stroke-only, unreproducible). Wrapped in a
-        // `<g translate(5,5)>` (rectOffset/2).
+        // Window pane: mermaid renders it via rough.js `rc.path` with a single
+        // `d` holding three subpaths — the outer rectangle plus the horizontal
+        // and vertical divider lines (the quadrant cross). `roughr` produces the
+        // fill (outer rectangle) and the stroke (rectangle + cross). Wrapped in a
+        // `<g translate(5,5)>` (rectOffset/2), matching the windowPane handler.
         NodeShape::WindowPane => {
             let ro = 10.0;
             let w = node.width - ro;
             let h = node.height - ro;
             let x = -w / 2.0;
             let y = -h / 2.0;
-            let pts = [
-                (x - ro, y - ro),
-                (x + w, y - ro),
-                (x + w, y + h),
-                (x - ro, y + h),
-                (x - ro, y - ro),
-            ];
+            let path_d = format!(
+                "M{},{} L{},{} L{},{} L{},{} L{},{} M{},{} L{},{} M{},{} L{},{}",
+                x - ro, y - ro, x + w, y - ro, x + w, y + h, x - ro, y + h, x - ro, y - ro,
+                x - ro, y, x + w, y,
+                x, y - ro, x, y + h,
+            );
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_d, &o);
             let _ = write!(s, r#"<g transform="translate(5, 5)" class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, false, "", &st);
+            emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
         // Stacked rectangle: rough.js outer+inner paths; we emit the outer fill.
@@ -745,9 +752,42 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
                 st = st, nx = round(-hw), ny = round(-hh), rx = round(hw - r), r = round(r), hh = round(hh),
             );
         }
-        // Document / lined-document / tagged-document: rectangle with a wavy
-        // bottom edge (approximated with two cubic bows). lin/tag add a decoration.
-        NodeShape::Document | NodeShape::LinedDocument | NodeShape::TaggedDocument => {
+        // Document: mermaid renders it via rough.js `rc.path` — the outline is a
+        // polyline whose bottom edge is a sampled sine wave (`waveEdgedRectangle`
+        // handler). `roughr` reproduces the fill and stroke; the group carries a
+        // `translate(0, -waveAmplitude/2)`.
+        NodeShape::Document => {
+            let h = node.height / 1.25;
+            let w = node.width;
+            let wave_amp = h / 8.0;
+            let final_h = h + wave_amp;
+            let mut pts: Vec<[f64; 2]> = Vec::with_capacity(54);
+            pts.push([-w / 2.0, final_h / 2.0]);
+            pts.extend(full_sine_wave_points(
+                -w / 2.0,
+                final_h / 2.0,
+                w / 2.0,
+                final_h / 2.0,
+                wave_amp,
+                0.8,
+            ));
+            pts.push([w / 2.0, -final_h / 2.0]);
+            pts.push([-w / 2.0, -final_h / 2.0]);
+            let path_d = path_from_points(&pts);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_d, &o);
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
+                round(-wave_amp / 2.0),
+            );
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
+        }
+        // Lined-document / tagged-document: rectangle with a wavy bottom edge
+        // (approximated with two cubic bows) plus a decoration. Not yet routed
+        // through roughr.
+        NodeShape::LinedDocument | NodeShape::TaggedDocument => {
             let wave = node.height * 0.1;
             let bot = hh - wave;
             let _ = write!(
@@ -967,6 +1007,83 @@ fn emit_rough_fill(s: &mut String, pts: &[(f64, f64)], evenodd: bool, close: &st
         s,
         r##"<path d="{d}" stroke="none" stroke-width="0" fill="#ECECFF"{rule}{st}/>"##,
     );
+}
+
+/// The classic-look `roughr` options for a node shape: solid fill in the theme
+/// node colour, theme border stroke, and the given `roughness` (0 for the
+/// classic look — its fill path is then the exact shape vertices). Mirrors
+/// mermaid's `userNodeOverrides(node, {})` + `roughness=0; fillStyle="solid"`.
+fn rough_options(roughness: f64) -> roughr::Options {
+    let gen = roughr::Generator::new();
+    let mut o = gen.default_options();
+    o.roughness = roughness;
+    o.fill = Some("#ECECFF".to_string());
+    o.fill_style = "solid".to_string();
+    o.stroke = "#9370DB".to_string();
+    o.bowing = 1.0;
+    o.seed = 1;
+    o
+}
+
+/// Emit a `roughr` [`Drawable`] as mermaid's rough shape DOM: a fill `<path>`
+/// (theme fill, `stroke="none"`) followed by a stroke `<path>` (theme border,
+/// `fill="none"`). `evenodd` adds `fill-rule="evenodd"` to the fill path
+/// (rc.polygon sets it; rc.path does not). `st` is the node's inline `style`
+/// attribute (empty when unstyled). This is the reusable primitive for scaling
+/// roughr rendering to every shape: build the `Drawable`, wrap it in the shape's
+/// `<g>`, and call this to emit the fill + stroke children.
+///
+/// [`Drawable`]: roughr::Drawable
+fn emit_rough_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, st: &str) {
+    let fill = drawable.fill_path(None);
+    let stroke = drawable.stroke_path(None);
+    let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+    let _ = write!(
+        s,
+        r##"<path d="{fill}" stroke="none" stroke-width="0" fill="#ECECFF"{rule}{st}/>"##,
+    );
+    let _ = write!(
+        s,
+        r##"<path d="{stroke}" stroke="#9370DB" stroke-width="1.3" fill="none" stroke-dasharray="0 0"{st}/>"##,
+    );
+}
+
+/// Port of mermaid's `generateFullSineWavePoints`: sample `50` steps of a sine
+/// wave from `(x1,y1)` to `(x2,y2)` with the given `amplitude` and cycle count.
+fn full_sine_wave_points(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    amplitude: f64,
+    num_cycles: f64,
+) -> Vec<[f64; 2]> {
+    let steps = 50;
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let cycle_len = dx / num_cycles;
+    let freq = 2.0 * std::f64::consts::PI / cycle_len;
+    let mid_y = y1 + dy / 2.0;
+    (0..=steps)
+        .map(|i| {
+            let t = i as f64 / steps as f64;
+            let x = x1 + t * dx;
+            let y = mid_y + amplitude * (freq * (x - x1)).sin();
+            [x, y]
+        })
+        .collect()
+}
+
+/// Port of mermaid's `createPathFromPoints`: an `M`/`L` polyline through `pts`,
+/// closed with `Z`. Full precision (no rounding), matching mermaid's input to
+/// rough.js.
+fn path_from_points(pts: &[[f64; 2]]) -> String {
+    let mut d = String::new();
+    for (i, p) in pts.iter().enumerate() {
+        let _ = write!(d, "{}{},{} ", if i == 0 { "M" } else { "L" }, p[0], p[1]);
+    }
+    d.push('Z');
+    d
 }
 
 /// Emit a `<polygon class="label-container">` from `points` with a translate and

@@ -57,6 +57,7 @@ name = "carcimaid"
 version = "0.0.0"
 dependencies = [
  "dagre",
+ "roughr",
  "ttf-parser",
 ]
 
