@@ -609,9 +609,10 @@ fn map_shape(name: &str) -> NodeShape {
         "subproc" | "subprocess" | "subroutine" | "framed-rectangle" | "fr-rect" => {
             NodeShape::Subroutine
         }
-        "cyl" | "cylinder" | "database" | "db" | "datastore" | "das" | "disk" => {
-            NodeShape::Cylinder
-        }
+        "cyl" | "cylinder" | "database" | "db" | "disk" => NodeShape::Cylinder,
+        // The data-store symbol renders as an open-ended (dashed-side) rect, not
+        // a 3D cylinder — mermaid emits `<rect stroke-dasharray="w h">`.
+        "datastore" | "das" => NodeShape::DataStore,
         "lean-r" | "lean-right" | "in-out" | "lin-r" => NodeShape::Parallelogram,
         "lean-l" | "lean-left" | "out-in" | "lin-l" => NodeShape::LeanLeft,
         "trap-b" | "trapezoid" | "trapezoid-bottom" | "manual" => NodeShape::Trapezoid,
@@ -780,7 +781,7 @@ mod tests {
         .unwrap();
         assert_eq!(chart.nodes[0].id, "DataStore");
         assert_eq!(chart.nodes[0].label, "Datastore");
-        assert_eq!(chart.nodes[0].shape, NodeShape::Cylinder);
+        assert_eq!(chart.nodes[0].shape, NodeShape::DataStore);
         assert_eq!(chart.nodes[1].shape, NodeShape::Circle);
     }
 

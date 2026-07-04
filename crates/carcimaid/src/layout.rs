@@ -154,7 +154,9 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
     let extra = (line_count - 1.0) * LINE_SPACING;
 
     match shape {
-        NodeShape::Rectangle => (text_w + 60.0, NODE_HEIGHT + extra),
+        // DataStore is a plain rectangle (dashed sides at render time), so it is
+        // sized exactly like one.
+        NodeShape::Rectangle | NodeShape::DataStore => (text_w + 60.0, NODE_HEIGHT + extra),
         NodeShape::RoundedRectangle => (text_w + 30.0, NODE_HEIGHT + extra),
         // Rhombus (mermaid `question`): a square diamond of side s = w + h.
         // Empirically the additive offset over our measured text width is 49 for

@@ -364,10 +364,18 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     match node.shape {
-        NodeShape::Rectangle => {
+        NodeShape::Rectangle | NodeShape::DataStore => {
+            // DataStore (`@{shape: datastore}`) is the same rect but with its
+            // vertical sides dashed away: a `stroke-dasharray` of the rect's own
+            // width/height draws only the top and bottom edges.
+            let dash = if matches!(node.shape, NodeShape::DataStore) {
+                format!(r#" stroke-dasharray="{} {}""#, round(node.width), round(node.height))
+            } else {
+                String::new()
+            };
             let _ = write!(
                 s,
-                r#"<rect class="basic label-container"{st} x="{}" y="{}" width="{}" height="{}"/>"#,
+                r#"<rect class="basic label-container"{st} x="{}" y="{}" width="{}" height="{}"{dash}/>"#,
                 round(-hw),
                 round(-hh),
                 round(node.width),

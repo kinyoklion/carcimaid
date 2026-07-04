@@ -103,6 +103,10 @@ pub enum NodeShape {
     InvTrapezoid,
     /// `A[(text)]` — cylinder / database (rendered approximately for now).
     Cylinder,
+    /// `@{shape: datastore}` — the open-ended data-store symbol: a plain
+    /// rectangle drawn with only its top and bottom edges (via a
+    /// `stroke-dasharray` of its own width/height). Distinct from [`Cylinder`].
+    DataStore,
 }
 
 /// A flowchart node.
