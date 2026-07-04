@@ -151,7 +151,7 @@ impl Default for Options {
 /// Compare two parsed SVG trees.
 pub fn compare(reference: &El, candidate: &El, opts: &Options) -> Report {
     let mut diffs = Vec::new();
-    diff_el(reference, candidate, "svg", opts, &mut diffs);
+    diff_el(reference, candidate, "svg", opts, &mut diffs, false);
     Report {
         tag_similarity: histogram_similarity(reference, candidate),
         reference_size: reference.size(),
@@ -160,7 +160,7 @@ pub fn compare(reference: &El, candidate: &El, opts: &Options) -> Report {
     }
 }
 
-fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>) {
+fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>, rough: bool) {
     if out.len() >= opts.max_differences {
         return;
     }
@@ -174,7 +174,7 @@ fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>
         });
         return;
     }
-    diff_attrs(r, c, path, opts, out);
+    diff_attrs(r, c, path, opts, out, rough);
     // <style> holds CSS, not diagram structure; mermaid emits a large theme
     // block we don't reproduce. Compare its presence/position but not its text.
     if r.tag != "style" && r.text != c.text {
@@ -215,6 +215,11 @@ fn strip_id_counter(id: &str) -> &str {
 /// omitted child is reported precisely instead of shifting every later child
 /// out of alignment (which would mask real per-element differences).
 fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>) {
+    // Children of a rough shape group (`<g class="…outer-path">`) are rough
+    // paths whose bezier control points are non-deterministic — mark them so
+    // their `d` is compared by anchor points. (`rc.polygon` fills are pure M/L,
+    // so anchor comparison is exact for them anyway.)
+    let child_rough = is_rough_group(r) || is_rough_group(c);
     let rk: Vec<String> = r.children.iter().map(child_key).collect();
     let ck: Vec<String> = c.children.iter().map(child_key).collect();
     let (n, m) = (rk.len(), ck.len());
@@ -245,7 +250,7 @@ fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Diffe
         }
         if rk[i] == ck[j] {
             let child_path = format!("{path}/{}[{i}]", r.children[i].tag);
-            diff_el(&r.children[i], &c.children[j], &child_path, opts, out);
+            diff_el(&r.children[i], &c.children[j], &child_path, opts, out, child_rough);
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
@@ -266,10 +271,34 @@ fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Diffe
     }
 }
 
-fn diff_attrs(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>) {
+fn diff_attrs(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>, rough: bool) {
     let ignored = |name: &str| opts.ignore_attrs.iter().any(|a| a == name);
+    // A rough shape path (a fill or stroke path inside a `<g class="…outer-path">`
+    // emitted by rough.js) has NON-DETERMINISTIC bezier control points: mermaid
+    // seeds rough.js with 0, which falls back to Math.random(), so its `d`
+    // differs on every render and can never be byte-matched. Its endpoints (the
+    // actual shape vertices) ARE stable, so we compare such a path by its anchor
+    // points within tolerance — verifying the outline while forgiving only the
+    // random control points. A bare stroke path (`fill="none"`) is treated the
+    // same. Edges are unaffected (their fill:none lives in `style`, not a `fill`
+    // attr, and they are not inside an outer-path group).
+    let d_by_anchor = (rough || is_stroke_path(r)) && r.tag == "path";
     for (name, rv) in &r.attrs {
         if ignored(name) {
+            continue;
+        }
+        if name == "d" && d_by_anchor {
+            let cv = c.attrs.get("d").map(String::as_str).unwrap_or("");
+            if !stroke_path_eq(rv, cv, opts.numeric_tolerance) {
+                out.push(Difference {
+                    path: path.to_string(),
+                    kind: DiffKind::AttrValueMismatch {
+                        name: name.clone(),
+                        reference: rv.clone(),
+                        candidate: cv.to_string(),
+                    },
+                });
+            }
             continue;
         }
         // `style` is compared as a normalized property set, so an empty style and
@@ -365,6 +394,139 @@ fn attr_eq(a: &str, b: &str, tol: f64) -> bool {
         return false;
     }
     an.iter().zip(bn.iter()).all(|(x, y)| (x - y).abs() <= tol)
+}
+
+/// Whether `el` is a rough shape's stroke `<path>`: `fill="none"` as an
+/// attribute. Rough shapes emit the outline stroke this way; our own edges keep
+/// `fill:none` inside `style`, so they are (correctly) excluded.
+fn is_stroke_path(el: &El) -> bool {
+    el.tag == "path" && el.attrs.get("fill").map(|f| f == "none").unwrap_or(false)
+}
+
+/// Whether `el` is a rough shape wrapper — the `<g class="…outer-path">` that
+/// rough.js emits, holding fill/stroke/inner-detail paths with non-deterministic
+/// control points. Its child paths are compared by anchor points.
+fn is_rough_group(el: &El) -> bool {
+    el.tag == "g"
+        && el
+            .attrs
+            .get("class")
+            .map(|c| c.split_whitespace().any(|t| t == "outer-path"))
+            .unwrap_or(false)
+}
+
+/// Compare two rough stroke paths by their anchor points (each path command's
+/// endpoint), ignoring bezier control points, within `tol`. Equal anchor counts
+/// are required — a differing outline (wrong/missing segments) still fails.
+fn stroke_path_eq(a: &str, b: &str, tol: f64) -> bool {
+    let (pa, pb) = (path_anchor_points(a), path_anchor_points(b));
+    pa.len() == pb.len()
+        && pa
+            .iter()
+            .zip(pb.iter())
+            .all(|((ax, ay), (bx, by))| (ax - bx).abs() <= tol && (ay - by).abs() <= tol)
+}
+
+/// The anchor points of an SVG path `d`: the endpoint of each drawing command
+/// (the pen position after it), dropping control points. Handles the commands
+/// rough.js emits (`M`/`L`/`C`) plus `H`/`V`/`S`/`Q`/`T`/`A`/`Z`. Absolute
+/// coordinates (what rough.js produces); relative commands are not expected.
+fn path_anchor_points(d: &str) -> Vec<(f64, f64)> {
+    let mut pts = Vec::new();
+    let (mut x, mut y) = (0.0f64, 0.0f64);
+    let (mut sx, mut sy) = (0.0f64, 0.0f64); // current subpath start (for Z)
+    let mut i = 0;
+    let bytes = d.as_bytes();
+    // Read the run of numbers following a command letter at position `i`.
+    let read_nums = |start: usize| -> (Vec<f64>, usize) {
+        let mut nums = Vec::new();
+        let mut j = start;
+        let mut cur = String::new();
+        while j < bytes.len() {
+            let ch = bytes[j] as char;
+            if ch.is_ascii_alphabetic() {
+                break;
+            }
+            let is_num = ch.is_ascii_digit() || ch == '.' || ch == 'e' || ch == 'E';
+            // A '-'/'+' starts a new number unless it's an exponent sign.
+            let is_sign = (ch == '-' || ch == '+')
+                && !(cur.ends_with('e') || cur.ends_with('E'));
+            if is_sign && !cur.is_empty() {
+                if let Ok(v) = cur.parse() {
+                    nums.push(v);
+                }
+                cur.clear();
+            }
+            if is_num || ch == '-' || ch == '+' {
+                cur.push(ch);
+            } else if !cur.is_empty() {
+                if let Ok(v) = cur.parse() {
+                    nums.push(v);
+                }
+                cur.clear();
+            }
+            j += 1;
+        }
+        if !cur.is_empty() {
+            if let Ok(v) = cur.parse() {
+                nums.push(v);
+            }
+        }
+        (nums, j)
+    };
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+        if !ch.is_ascii_alphabetic() {
+            i += 1;
+            continue;
+        }
+        let (nums, next) = read_nums(i + 1);
+        match ch {
+            'M' => {
+                if nums.len() >= 2 {
+                    x = nums[0];
+                    y = nums[1];
+                    sx = x;
+                    sy = y;
+                    pts.push((x, y));
+                }
+            }
+            'L' | 'T' => {
+                if nums.len() >= 2 {
+                    x = nums[nums.len() - 2];
+                    y = nums[nums.len() - 1];
+                    pts.push((x, y));
+                }
+            }
+            'C' | 'S' | 'Q' | 'A' => {
+                if nums.len() >= 2 {
+                    x = nums[nums.len() - 2];
+                    y = nums[nums.len() - 1];
+                    pts.push((x, y));
+                }
+            }
+            'H' => {
+                if let Some(&v) = nums.last() {
+                    x = v;
+                    pts.push((x, y));
+                }
+            }
+            'V' => {
+                if let Some(&v) = nums.last() {
+                    y = v;
+                    pts.push((x, y));
+                }
+            }
+            'Z' | 'z' => {
+                x = sx;
+                y = sy;
+                pts.push((x, y));
+            }
+            _ => {}
+        }
+        i = next;
+    }
+    pts
 }
 
 /// Split a string into its non-numeric "skeleton" tokens and its numbers.
@@ -476,6 +638,36 @@ mod tests {
         // Exactly one missing element (the title); the <g>/<rect> match cleanly.
         assert_eq!(report.differences.len(), 1, "{:?}", report.differences);
         assert!(matches!(kinds[0], DiffKind::ElementMissing { .. }));
+    }
+
+    #[test]
+    fn rough_stroke_paths_match_by_anchor_points() {
+        // Two rough strokes: same anchor endpoints, different (random) control
+        // points. They must match; a stroke with a moved endpoint must not.
+        let a = parse(
+            r##"<svg><path fill="none" stroke="#000" d="M0 0 C10 0, 20 0, 30 0 M30 0 C30 10, 30 20, 30 30"/></svg>"##,
+        )
+        .unwrap();
+        let b = parse(
+            r##"<svg><path fill="none" stroke="#000" d="M0 0 C5 1, 25 -1, 30 0 M30 0 C31 15, 29 25, 30 30"/></svg>"##,
+        )
+        .unwrap();
+        assert!(compare(&a, &b, &Options::default()).is_match());
+
+        let moved = parse(
+            r##"<svg><path fill="none" stroke="#000" d="M0 0 C5 1, 25 -1, 40 0 M40 0 C31 15, 29 25, 30 30"/></svg>"##,
+        )
+        .unwrap();
+        assert!(!compare(&a, &moved, &Options::default()).is_match());
+    }
+
+    #[test]
+    fn fill_paths_still_compared_exactly() {
+        // A filled path (not fill:none) is NOT given anchor-only tolerance: a
+        // moved control point is a real difference.
+        let a = parse(r##"<svg><path fill="#eee" d="M0 0 C10 0, 20 0, 30 0"/></svg>"##).unwrap();
+        let b = parse(r##"<svg><path fill="#eee" d="M0 0 C5 5, 25 5, 30 0"/></svg>"##).unwrap();
+        assert!(!compare(&a, &b, &Options::default()).is_match());
     }
 
     #[test]

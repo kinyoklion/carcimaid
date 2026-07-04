@@ -538,7 +538,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             emit_rough_drawable(s, &drawable, true, &st);
             s.push_str("</g>");
         }
-        // Lined/shaded process: rough.js fill polygon (rect + a left bar).
+        // Lined/shaded process: mermaid `rc.polygon` — a rectangle plus a left
+        // bar (the polygon doubles back along the divider). rc.polygon sets
+        // `fill-rule="evenodd"`.
         NodeShape::LinedProcess => {
             let frame = 8.0;
             let total_w = node.width;
@@ -547,16 +549,18 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let x = frame - total_w / 2.0;
             let y = -h / 2.0;
             let pts = [
-                (x, y),
-                (x + w, y),
-                (x + w, y + h),
-                (x - frame, y + h),
-                (x - frame, y),
-                (x, y),
-                (x, y + h),
+                [x, y],
+                [x + w, y],
+                [x + w, y + h],
+                [x - frame, y + h],
+                [x - frame, y],
+                [x, y],
+                [x, y + h],
             ];
-            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, true, "", &st);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().polygon(&pts, &o);
+            s.push_str(r#"<g class="basic label-container outer-path">"#);
+            emit_rough_drawable(s, &drawable, true, &st);
             s.push_str("</g>");
         }
         // Window pane: mermaid renders it via rough.js `rc.path` with a single
@@ -582,29 +586,44 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Stacked rectangle: rough.js outer+inner paths; we emit the outer fill.
+        // Stacked rectangle / multi-process: mermaid draws an outer and an inner
+        // `rc.path`, each collapsed to one element via `mergePaths` for the
+        // classic look. The dagre bbox overflows the body by `rectOffset` (5) on
+        // each side, so recover `w = node.width - 10`, `h = node.height - 10`.
         NodeShape::StackedRect => {
             let ro = 5.0;
             let w = node.width - 2.0 * ro;
             let h = node.height - 2.0 * ro;
             let x = -w / 2.0;
             let y = -h / 2.0;
-            let pts = [
-                (x - ro, y + ro),
-                (x - ro, y + h + ro),
-                (x + w - ro, y + h + ro),
-                (x + w - ro, y + h),
-                (x + w, y + h),
-                (x + w, y + h - ro),
-                (x + w + ro, y + h - ro),
-                (x + w + ro, y - ro),
-                (x + ro, y - ro),
-                (x + ro, y),
-                (x, y),
-                (x, y + ro),
+            let outer = [
+                [x - ro, y + ro],
+                [x - ro, y + h + ro],
+                [x + w - ro, y + h + ro],
+                [x + w - ro, y + h],
+                [x + w, y + h],
+                [x + w, y + h - ro],
+                [x + w + ro, y + h - ro],
+                [x + w + ro, y - ro],
+                [x + ro, y - ro],
+                [x + ro, y],
+                [x, y],
+                [x, y + ro],
             ];
-            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, true, "Z", &st);
+            let inner = [
+                [x, y + ro],
+                [x + w - ro, y + ro],
+                [x + w - ro, y + h],
+                [x + w, y + h],
+                [x + w, y],
+                [x, y],
+            ];
+            let o = rough_options(roughness);
+            let outer_d = roughr::Generator::new().path(&path_from_points(&outer), &o);
+            let inner_d = roughr::Generator::new().path(&path_from_points(&inner), &o);
+            s.push_str(r#"<g class="basic label-container outer-path">"#);
+            emit_merged(s, &outer_d, &st);
+            emit_merged(s, &inner_d, &st);
             s.push_str("</g>");
         }
         // Notched rectangle (card): an exact `<polygon>` (insertPolygonShape), a
@@ -615,142 +634,174 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let pts = [(n, -h), (w, -h), (w, 0.0), (0.0, 0.0), (0.0, -h + n), (n, -h)];
             emit_polygon(s, &pts, -w / 2.0, h / 2.0, &st);
         }
-        // Notched pentagon (loop limit): mermaid uses a rough curved path; we emit
-        // the straight fill (element + size match; the seeded stroke curve is not
-        // reproducible, leaving a `d` residual).
+        // Notched pentagon (loop limit): mermaid `rc.path` through 6 points.
         NodeShape::NotchedPentagon => {
             let (w, h) = (node.width / 2.0, node.height / 2.0);
             let pts = [
-                (-w * 0.8, -h),
-                (w * 0.8, -h),
-                (w, -h * 0.6),
-                (w, h),
-                (-w, h),
-                (-w, -h * 0.6),
+                [-w * 0.8, -h],
+                [w * 0.8, -h],
+                [w, -h * 0.6],
+                [w, h],
+                [-w, h],
+                [-w, -h * 0.6],
             ];
-            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
+            s.push_str(r#"<g class="basic label-container outer-path">"#);
+            emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Triangle / flipped triangle (rough curved path; straight approximation).
-        // The base `tw` equals the height; the group is translated to centre it.
+        // Triangle / flipped triangle: mermaid renders these via rough.js
+        // `rc.path` (base `tw` == height); the group is translated to centre it.
         NodeShape::Triangle | NodeShape::FlippedTriangle => {
             let h = node.height;
-            let pts = if matches!(node.shape, NodeShape::Triangle) {
-                [(0.0, 0.0), (h, 0.0), (h / 2.0, -h)]
+            let pts: [[f64; 2]; 3] = if matches!(node.shape, NodeShape::Triangle) {
+                [[0.0, 0.0], [h, 0.0], [h / 2.0, -h]]
             } else {
-                [(0.0, -h), (h, -h), (h / 2.0, 0.0)]
+                [[0.0, -h], [h, -h], [h / 2.0, 0.0]]
             };
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
-                r#"<g class="outer-path" transform="translate({}, {})">"#,
+                r#"<g transform="translate({}, {})" class="outer-path">"#,
                 round(-h / 2.0),
                 round(h / 2.0),
             );
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Sloped rectangle (rough curved path; straight approximation). The drawn
-        // height is 1.5·h (node.height); the shape body uses h = node.height/1.5.
+        // Sloped rectangle (mermaid `rc.path`). The drawn height spans 1.5·h
+        // (node.height); the shape body uses h = node.height/1.5. Note mermaid's
+        // class has a double space ("basic label-container  outer-path").
         NodeShape::SlopedRect => {
             let w = node.width;
             let h = node.height / 1.5;
             let (x, y) = (-w / 2.0, -h / 2.0);
-            let pts = [(x, y), (x, y + h), (x + w, y + h), (x + w, y - h / 2.0)];
+            let pts = [[x, y], [x, y + h], [x + w, y + h], [x + w, y - h / 2.0]];
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container  outer-path" transform="translate(0, {})">"#,
                 round(h / 4.0),
             );
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Curved trapezoid (display): rough curved path with an arced left edge;
-        // approximated as a straight-edged trapezoid (element + size match).
+        // Curved trapezoid (display): mermaid `rc.path` — trapezoid with an arced
+        // left edge (a sampled half-ellipse). Points in mermaid's [0,w]×[0,h]
+        // frame, then centred via `translate(-w/2, -h/2)`.
         NodeShape::CurvedTrapezoid => {
             let (w, h) = (node.width, node.height);
             let radius = h / 2.0;
             let rw = w - radius;
             let tw = h / 4.0;
-            // Points in mermaid's [0,w]×[0,h] frame, then centred via translate.
-            let pts = [
-                (rw, 0.0),
-                (tw, 0.0),
-                (0.0, h / 2.0),
-                (tw, h),
-                (rw, h),
+            let mut pts: Vec<[f64; 2]> = vec![
+                [rw, 0.0],
+                [tw, 0.0],
+                [0.0, h / 2.0],
+                [tw, h],
+                [rw, h],
             ];
+            pts.extend(generate_circle_points(-rw, -h / 2.0, radius, 50, 270.0, 90.0));
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container outer-path" transform="translate({}, {})">"#,
                 round(-w / 2.0),
                 round(-h / 2.0),
             );
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Filled junction circle (r=7, no label). mermaid draws a rough bezier
-        // path; we emit a plain circle (visually identical, correct size).
+        // Filled junction circle (filledCircle, r=7, no label): mermaid
+        // `rc.circle` (solid), both paths styled `fill: nodeBorder !important`.
         NodeShape::FilledCircle => {
-            let _ = write!(
-                s,
-                r#"<path class="outer-path"{st} d="M-7,0 a7,7 0 1 0 14,0 a7,7 0 1 0 -14,0 Z"/>"#,
-            );
-        }
-        // Framed stop circle: outer (r=7, as a path) + filled inner (r=2.5).
-        NodeShape::FramedCircle => {
-            let _ = write!(
-                s,
-                concat!(
-                    r#"<g class="basic label-container"{st}>"#,
-                    r#"<path class="outer-circle"{st} d="M-7,0 a7,7 0 1 0 14,0 a7,7 0 1 0 -14,0 Z"/>"#,
-                    r#"<circle class="inner-circle"{st} r="2.5" cx="0" cy="0"/></g>"#,
-                ),
-                st = st,
-            );
-        }
-        // Crossed circle (r=30, no label): a circle (as a path) with an X across it.
-        NodeShape::CrossedCircle => {
-            let r = 30.0_f64;
-            let d = r * (0.5_f64).sqrt(); // 45° offset for the X arms
-            let _ = write!(
-                s,
-                concat!(
-                    r#"<g class="outer-path"{st}>"#,
-                    r#"<path{st} d="M{nr},0 a{r},{r} 0 1 0 {dd},0 a{r},{r} 0 1 0 {ndd},0 Z"/>"#,
-                    r#"<path{st} d="M{a},{na} L{na},{a} M{na},{na} L{a},{a}"/></g>"#,
-                ),
-                st = st,
-                r = round(r), nr = round(-r), dd = round(2.0 * r), ndd = round(-2.0 * r),
-                a = round(d),
-                na = round(-d),
-            );
-        }
-        // Odd / flag (rect_left_inv_arrow): rectangle with a notched left edge.
-        NodeShape::Odd => {
-            let notch = -hh / 2.0; // y/2 in mermaid's frame (y = -h/2)
-            let pts = [
-                (-hw + notch, -hh),
-                (-hw, 0.0),
-                (-hw + notch, hh),
-                (hw, hh),
-                (hw, -hh),
-            ];
-            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
+            s.push_str("<g>");
+            emit_drawable(s, &drawable, false, r#" style="fill: #9370DB !important;""#, Some("#ECECFF"), "#9370DB", "1.3");
             s.push_str("</g>");
         }
-        // Delay: rectangle with a rounded right end (radius = h/2).
-        NodeShape::Delay => {
-            let r = hh;
+        // Framed stop circle (stateEnd): an outer `rc.circle` (stroke = line
+        // colour #333, width 2) and a filled inner `rc.circle` (fill/stroke =
+        // node border #9370DB). Inner is nested in its own `<g>`.
+        NodeShape::FramedCircle => {
+            let o = rough_options(roughness);
+            let gen = roughr::Generator::new();
+            let mut outer_o = o.clone();
+            outer_o.stroke = "#333333".to_string();
+            let outer = gen.circle(0.0, 0.0, node.width, &outer_o);
+            let mut inner_o = o.clone();
+            inner_o.fill = Some("#9370DB".to_string());
+            inner_o.stroke = "#9370DB".to_string();
+            let inner = gen.circle(0.0, 0.0, node.width * 5.0 / 14.0, &inner_o);
+            s.push_str(r#"<g class="outer-path">"#);
+            emit_drawable(s, &outer, false, &st, Some("#ECECFF"), "#333333", "2");
+            s.push_str("<g>");
+            emit_drawable(s, &inner, false, &st, Some("#9370DB"), "#9370DB", "2");
+            s.push_str("</g></g>");
+        }
+        // Crossed circle (crossedCircle, r=30, no label): a `rc.circle` with an X
+        // (`rc.path`) drawn across it; the line's fill is empty. Inner line is
+        // nested in its own `<g>`.
+        NodeShape::CrossedCircle => {
+            let r = node.width / 2.0;
+            let o = rough_options(roughness);
+            let gen = roughr::Generator::new();
+            let circle = gen.circle(0.0, 0.0, node.width, &o);
+            // mermaid's createLine: two diagonals through the ±45° points.
+            let a = r * (0.5_f64).sqrt();
+            let line_d = format!("M {},{} L {},{}\n                   M {},{} L {},{}", -a, a, a, -a, a, a, -a, -a);
+            let line = gen.path(&line_d, &o);
+            s.push_str(r#"<g class="outer-path">"#);
+            emit_rough_drawable(s, &circle, false, &st);
+            s.push_str("<g>");
+            emit_rough_drawable(s, &line, false, &st);
+            s.push_str("</g></g>");
+        }
+        // Odd (rect_left_inv_arrow): rectangle with a notched left edge, mermaid
+        // `rc.path`. The dagre bbox is `w + h/4` (the notch overflows left by
+        // h/4), so recover the inner width `w = node.width - h/4`; the group is
+        // shifted right by `-notch/2 = h/8`.
+        NodeShape::Odd => {
+            let h = node.height;
+            let w = node.width - h / 4.0;
+            let (x, y) = (-w / 2.0, -h / 2.0);
+            let notch = y / 2.0;
+            let pts = [
+                [x + notch, y],
+                [x, 0.0],
+                [x + notch, -y],
+                [-x, -y],
+                [-x, y],
+            ];
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} "#,
-                    r#"L{rx},{ny} A{r},{r} 0 0 1 {rx},{hh} L{nx},{hh} Z"/>"#,
-                ),
-                st = st, nx = round(-hw), ny = round(-hh), rx = round(hw - r), r = round(r), hh = round(hh),
+                r#"<g class="basic label-container outer-path" transform="translate({},0)">"#,
+                round(-notch / 2.0),
             );
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
+        }
+        // Delay (halfRoundedRectangle): rectangle with a rounded right end, drawn
+        // by mermaid via `rc.path` — the right edge is a sampled semicircle.
+        NodeShape::Delay => {
+            let (w, h) = (node.width, node.height);
+            let radius = h / 2.0;
+            let mut pts: Vec<[f64; 2]> = vec![[-w / 2.0, -h / 2.0], [w / 2.0 - radius, -h / 2.0]];
+            pts.extend(generate_circle_points(-w / 2.0 + radius, 0.0, radius, 50, 90.0, 270.0));
+            pts.push([w / 2.0 - radius, h / 2.0]);
+            pts.push([-w / 2.0, h / 2.0]);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
+            s.push_str(r#"<g class="basic label-container outer-path">"#);
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
         }
         // Document: mermaid renders it via rough.js `rc.path` — the outline is a
         // polyline whose bottom edge is a sampled sine wave (`waveEdgedRectangle`
@@ -784,97 +835,194 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             emit_rough_drawable(s, &drawable, false, &st);
             s.push_str("</g>");
         }
-        // Lined-document / tagged-document: rectangle with a wavy bottom edge
-        // (approximated with two cubic bows) plus a decoration. Not yet routed
-        // through roughr.
-        NodeShape::LinedDocument | NodeShape::TaggedDocument => {
-            let wave = node.height * 0.1;
-            let bot = hh - wave;
+        // Lined document (linedWaveEdgedRect): rectangle with a wavy bottom edge
+        // plus a left divider line, all traced by a single mermaid `rc.polygon`
+        // (the polygon doubles back up the divider). The dagre bbox is `1.1·w`
+        // wide (the outline overflows ±w·0.05) and the divider point reaches
+        // `finalH/2·1.1`; recover w/finalH from that. `fill-rule="evenodd"`.
+        NodeShape::LinedDocument => {
+            let w = node.width / 1.1;
+            let final_h = node.height / 1.1055;
+            let wave_amp = final_h / 9.0; // finalH = h + h/8 = 1.125h -> waveAmp = finalH/9
+            let ext = w / 2.0 * 0.1;
+            let mut pts: Vec<[f64; 2]> = vec![
+                [-w / 2.0 - ext, -final_h / 2.0],
+                [-w / 2.0 - ext, final_h / 2.0],
+            ];
+            pts.extend(full_sine_wave_points(-w / 2.0 - ext, final_h / 2.0, w / 2.0 + ext, final_h / 2.0, wave_amp, 0.8));
+            pts.push([w / 2.0 + ext, -final_h / 2.0]);
+            pts.push([-w / 2.0 - ext, -final_h / 2.0]);
+            pts.push([-w / 2.0, -final_h / 2.0]);
+            pts.push([-w / 2.0, final_h / 2.0 * 1.1]);
+            pts.push([-w / 2.0, -final_h / 2.0]);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().polygon(&pts, &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{x},{ny} "#,
-                    r#"L{x},{bot} C{cx1},{c1},{cx2},{c2},0,{bot} C{cx3},{c3},{cx4},{c4},{nx},{bot} Z"/>"#,
-                ),
-                st = st, nx = round(-hw), ny = round(-hh), x = round(hw), bot = round(bot),
-                cx1 = round(hw * 0.66), c1 = round(bot + wave * 2.0),
-                cx2 = round(hw * 0.33), c2 = round(bot - wave * 2.0),
-                cx3 = round(-hw * 0.33), c3 = round(bot + wave * 2.0),
-                cx4 = round(-hw * 0.66), c4 = round(bot - wave * 2.0),
+                r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
+                round(-wave_amp / 2.0),
             );
-            if matches!(node.shape, NodeShape::LinedDocument) {
-                let lx = -hw + 8.0;
-                let _ = write!(s, r#"<path{st} d="M{lx},{ny} L{lx},{bot}"/>"#, st = st, lx = round(lx), ny = round(-hh), bot = round(bot));
-            }
-            if matches!(node.shape, NodeShape::TaggedDocument) {
-                let t = 12.0;
-                let _ = write!(s, r#"<path{st} d="M{x0},{y0} L{x1},{y0} L{x1},{y1}"/>"#, st = st, x0 = round(hw - t), y0 = round(hh - wave - t), x1 = round(hw), y1 = round(hh - wave));
-            }
+            emit_rough_drawable(s, &drawable, true, &st);
+            s.push_str("</g>");
         }
-        // Stacked documents: two offset outlines behind a front document.
+        // Tagged document (taggedWaveEdgedRectangle): a wave-edged document
+        // (rc.path, nested `<g>`) plus a folded-corner tag (rc.path, drawn after).
+        NodeShape::TaggedDocument => {
+            let w = node.width / 1.1;
+            let h = node.height / 1.25;
+            let wave_amp = h / 8.0;
+            let tag_w = 0.2 * w;
+            let tag_h = 0.2 * h;
+            let final_h = h + wave_amp;
+            let ext = w / 2.0 * 0.1;
+            // Document outline (rc.path).
+            let mut doc: Vec<[f64; 2]> = vec![[-w / 2.0 - ext, final_h / 2.0]];
+            doc.extend(full_sine_wave_points(-w / 2.0 - ext, final_h / 2.0, w / 2.0 + ext, final_h / 2.0, wave_amp, 0.8));
+            doc.push([w / 2.0 + ext, -final_h / 2.0]);
+            doc.push([-w / 2.0 - ext, -final_h / 2.0]);
+            // Tag (rc.path).
+            let x = -w / 2.0 + ext;
+            let y = -final_h / 2.0 - tag_h * 0.4;
+            let mut tag: Vec<[f64; 2]> = vec![
+                [x + w - tag_w, (y + h) * 1.3],
+                [x + w, y + h - tag_h],
+                [x + w, (y + h) * 0.9],
+            ];
+            tag.extend(full_sine_wave_points(x + w, (y + h) * 1.25, x + w - tag_w, (y + h) * 1.3, -h * 0.02, 0.5));
+            let o = rough_options(roughness);
+            let doc_d = roughr::Generator::new().path(&path_from_points(&doc), &o);
+            let tag_d = roughr::Generator::new().path(&path_from_points(&tag), &o);
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
+                round(-wave_amp / 2.0),
+            );
+            s.push_str("<g>");
+            emit_rough_drawable(s, &doc_d, false, &st);
+            s.push_str("</g>");
+            emit_rough_drawable(s, &tag_d, false, &st);
+            s.push_str("</g>");
+        }
+        // Stacked documents (multiWaveEdgedRectangle): an outer wave-edged
+        // "stack" outline plus an inner document, both mermaid `rc.path`. The
+        // dagre bbox is `w + 20` wide and `19h/16 + 20` tall (the outline
+        // overflows by rectOffset=10 and the wave dips waveAmp below); recover
+        // w/h from that. Inner document is nested in its own `<g>`.
         NodeShape::Documents => {
-            let off = node.height * 0.12;
-            let fw = hw - off;
-            let fh = hh - off;
+            let ro = 10.0;
+            let w = node.width - 20.0;
+            let h = (node.height - 20.0) * 16.0 / 19.0;
+            let wave_amp = h / 8.0;
+            let final_h = h + wave_amp / 2.0;
+            let x = -w / 2.0;
+            let y = -final_h / 2.0;
+            let wave = full_sine_wave_points(x - ro, y + final_h + ro, x + w - ro, y + final_h + ro, wave_amp, 0.8);
+            let last = *wave.last().unwrap();
+            let mut outer: Vec<[f64; 2]> = vec![[x - ro, y + ro], [x - ro, y + final_h + ro]];
+            outer.extend_from_slice(&wave);
+            outer.extend_from_slice(&[
+                [x + w - ro, last[1] - ro],
+                [x + w, last[1] - ro],
+                [x + w, last[1] - 2.0 * ro],
+                [x + w + ro, last[1] - 2.0 * ro],
+                [x + w + ro, y - ro],
+                [x + ro, y - ro],
+                [x + ro, y],
+                [x, y],
+                [x, y + ro],
+            ]);
+            let inner = [
+                [x, y + ro],
+                [x + w - ro, y + ro],
+                [x + w - ro, last[1] - ro],
+                [x + w, last[1] - ro],
+                [x + w, y],
+                [x, y],
+            ];
+            let o = rough_options(roughness);
+            let outer_d = roughr::Generator::new().path(&path_from_points(&outer), &o);
+            let inner_d = roughr::Generator::new().path(&path_from_points(&inner), &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<g class="basic label-container outer-path"{st}>"#,
-                    r#"<path{st} d="M{x2},{ny} L{xr},{ny} L{xr},{yb} L{x2},{yb} Z"/>"#,
-                    r#"<path{st} d="M{x1},{y1} L{xr1},{y1} L{xr1},{yb1} L{x1},{yb1} Z"/>"#,
-                    r#"<path{st} d="M{fnx},{fy} L{fx},{fy} L{fx},{fbot} C{c1x},{c1},{c2x},{c2},{fnx},{fbot} Z"/></g>"#,
-                ),
-                st = st,
-                x2 = round(-hw), ny = round(-hh), xr = round(-hw + 2.0 * fw), yb = round(-hh + 2.0 * fh),
-                x1 = round(-hw + off), y1 = round(-hh + off), xr1 = round(-hw + off + 2.0 * fw), yb1 = round(-hh + off + 2.0 * fh),
-                fnx = round(-fw), fy = round(-fh), fx = round(fw), fbot = round(fh - off),
-                c1x = round(fw * 0.4), c1 = round(fh + off), c2x = round(-fw * 0.4), c2 = round(fh - off),
+                r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
+                round(-wave_amp / 2.0),
             );
+            emit_rough_drawable(s, &outer_d, false, &st);
+            s.push_str("<g>");
+            emit_rough_drawable(s, &inner_d, false, &st);
+            s.push_str("</g></g>");
         }
-        // Tagged rectangle: a rectangle with a folded bottom-right corner tag.
+        // Tagged rectangle (taggedRect): a rectangle (rc.path, nested `<g>`) plus
+        // a folded-corner tag (rc.path, drawn after). The dagre bbox is
+        // `w + tagWidth` wide where tagWidth = 0.2·h; recover `w`.
         NodeShape::TaggedRect => {
-            let t = node.height * 0.2;
-            let _ = write!(
-                s,
-                concat!(
-                    r#"<g class="basic label-container outer-path"{st}>"#,
-                    r#"<path{st} d="M{nx},{ny} L{hw},{ny} L{hw},{hh} L{nx},{hh} Z"/>"#,
-                    r#"<path{st} d="M{x0},{hh} L{hw},{y0} L{hw},{hh} Z"/></g>"#,
-                ),
-                st = st, nx = round(-hw), ny = round(-hh),
-                x0 = round(hw - t), hh = round(hh), hw = round(hw), y0 = round(hh - t),
-            );
+            let h = node.height;
+            let tag = 0.2 * h; // TAG_RATIO * totalHeight
+            let w = node.width - tag;
+            let (x, y) = (-w / 2.0, -h / 2.0);
+            let rect_pts = [
+                [x - tag / 2.0, y],
+                [x + w + tag / 2.0, y],
+                [x + w + tag / 2.0, y + h],
+                [x - tag / 2.0, y + h],
+            ];
+            let tag_pts = [
+                [x + w - tag / 2.0, y + h],
+                [x + w + tag / 2.0, y + h],
+                [x + w + tag / 2.0, y + h - tag],
+            ];
+            let o = rough_options(roughness);
+            let rect_d = roughr::Generator::new().path(&path_from_points(&rect_pts), &o);
+            let tag_d = roughr::Generator::new().path(&path_from_points(&tag_pts), &o);
+            s.push_str(r#"<g class="basic label-container outer-path">"#);
+            s.push_str("<g>");
+            emit_rough_drawable(s, &rect_d, false, &st);
+            s.push_str("</g>");
+            emit_rough_drawable(s, &tag_d, false, &st);
+            s.push_str("</g>");
         }
-        // Bow-tie rectangle: rectangle with concave (inward-arced) left/right sides.
+        // Bow-tie rectangle (bowTieRect): rectangle with concave (inward-arced)
+        // left/right sides sampled by mermaid via `generateArcPoints`, drawn with
+        // `rc.path`. `ry = h/2`, `rx = ry/(2.5 + h/50)`; the group is shifted
+        // right by `rx/2`.
         NodeShape::BowTieRect => {
-            let sag = 5.0;
+            let h = node.height;
+            let ry = h / 2.0;
+            let rx = ry / (2.5 + h / 50.0);
+            // The dagre box width is `w + sagitta` (the arced sides sit inside w
+            // but mermaid pads the box by the sagitta); recover the body width.
+            let w = node.width - arc_sagitta(h, rx, ry);
+            let mut pts: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0], [-w / 2.0, -h / 2.0]];
+            pts.extend(generate_arc_points(-w / 2.0, -h / 2.0, -w / 2.0, h / 2.0, rx, ry, false));
+            pts.push([w / 2.0, h / 2.0]);
+            pts.extend(generate_arc_points(w / 2.0, h / 2.0, w / 2.0, -h / 2.0, rx, ry, true));
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{hw},{ny} "#,
-                    r#"Q{qx},0 {hw},{hh} L{nx},{hh} Q{nqx},0 {nx},{ny} Z"/>"#,
-                ),
-                st = st, nx = round(-hw), ny = round(-hh), hw = round(hw), hh = round(hh),
-                qx = round(hw - sag), nqx = round(-hw + sag),
+                r#"<g class="basic label-container outer-path" transform="translate({}, 0)">"#,
+                round(rx / 2.0),
             );
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
         }
-        // Wave rectangle (flag / paper tape): wavy top and bottom edges.
+        // Wave rectangle (flag / paper tape): wavy top and bottom edges, mermaid
+        // `rc.path`. The dagre bbox height is the drawn `finalH = 1.25·h`, so
+        // recover `waveAmplitude = finalH/10` (= h/8). Class is just
+        // "basic label-container" (no outer-path).
         NodeShape::WaveRect => {
-            let wave = node.height * 0.12;
-            let top = -hh + wave;
-            let bot = hh - wave;
-            let _ = write!(
-                s,
-                concat!(
-                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{top} "#,
-                    r#"C{cx1},{tc1},{cx2},{tc2},{hw},{top} L{hw},{bot} "#,
-                    r#"C{cx2},{bc1},{cx1},{bc2},{nx},{bot} Z"/>"#,
-                ),
-                st = st, nx = round(-hw), hw = round(hw), top = round(top), bot = round(bot),
-                cx1 = round(-hw * 0.33), cx2 = round(hw * 0.33),
-                tc1 = round(top - wave * 2.0), tc2 = round(top + wave * 2.0),
-                bc1 = round(bot + wave * 2.0), bc2 = round(bot - wave * 2.0),
-            );
+            let w = node.width;
+            let final_h = node.height;
+            let wave_amp = final_h / 10.0;
+            let mut pts: Vec<[f64; 2]> = vec![[-w / 2.0, final_h / 2.0]];
+            pts.extend(full_sine_wave_points(-w / 2.0, final_h / 2.0, w / 2.0, final_h / 2.0, wave_amp, 1.0));
+            pts.push([w / 2.0, -final_h / 2.0]);
+            pts.extend(full_sine_wave_points(w / 2.0, -final_h / 2.0, -w / 2.0, -final_h / 2.0, wave_amp, -1.0));
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
+            s.push_str(r#"<g class="basic label-container">"#);
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
         }
         // Horizontal cylinder: a cylinder lying on its side (elliptical ends).
         NodeShape::HorizontalCylinder => {
@@ -911,11 +1059,17 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 tx = round(-w / 2.0), ty = round(-node.height / 2.0), cap = round(2.0 * ry),
             );
         }
-        // Fork/join: a thin solid bar (no label), drawn as a path.
+        // Fork/join: a thin solid bar (no label), mermaid `rc.rectangle` filled
+        // and stroked in the theme line colour (#333333). The shape `<g>` carries
+        // no class in the classic look.
         NodeShape::Fork => {
-            let pts = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)];
-            let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_fill(s, &pts, false, "Z", &st);
+            let (w, h) = (node.width, node.height);
+            let mut o = rough_options(roughness);
+            o.fill = Some("#333333".to_string());
+            o.stroke = "#333333".to_string();
+            let drawable = roughr::Generator::new().rectangle(-w / 2.0, -h / 2.0, w, h, &o);
+            s.push_str("<g>");
+            emit_drawable(s, &drawable, false, &st, Some("#333333"), "#333333", "1.3");
             s.push_str("</g>");
         }
         // Text block: a borderless rectangle (label only).
@@ -926,31 +1080,48 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 st = st, nx = round(-hw), ny = round(-hh), w = round(2.0 * hw), h = round(2.0 * hh),
             );
         }
-        // Hourglass (collate): two triangles meeting at the centre.
+        // Hourglass (collate): two triangles meeting at the centre, drawn by
+        // mermaid via `rc.path` on points [(0,0),(w,0),(0,h),(w,h)] with a
+        // centring `translate(-w/2, -h/2)`.
         NodeShape::Hourglass => {
+            let (w, h) = (node.width, node.height);
+            let pts = [[0.0, 0.0], [w, 0.0], [0.0, h], [w, h]];
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<path{st} class="basic label-container outer-path" d="M{nx},{ny} L{hw},{ny} "#,
-                    r#"L{nx},{hh} L{hw},{hh} Z"/>"#,
-                ),
-                st = st, nx = round(-hw), ny = round(-hh), hw = round(hw), hh = round(hh),
+                r#"<g class="basic label-container outer-path" transform="translate({}, {})">"#,
+                round(-w / 2.0),
+                round(-h / 2.0),
             );
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
         }
-        // Lightning bolt: a zig-zag polygon.
+        // Lightning bolt: a zig-zag drawn by mermaid via `rc.path`. The dagre
+        // bbox height is `2*height`, so recover `height = node.height / 2`; the
+        // group is translated by `(-width/2, -height)`.
         NodeShape::LightningBolt => {
+            let width = node.width;
+            let height = node.height / 2.0;
+            let gap = 7.0;
+            let pts = [
+                [width, 0.0],
+                [0.0, height + gap / 2.0],
+                [width - 2.0 * gap, height + gap / 2.0],
+                [0.0, 2.0 * height],
+                [width, height - gap / 2.0],
+                [2.0 * gap, height - gap / 2.0],
+            ];
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
-                concat!(
-                    r#"<path{st} class="outer-path" d="M{x0},{ny} L{x1},{y1} L{x2},{y1} "#,
-                    r#"L{x0b},{hh} L{x3},{y3} L{x4},{y3} Z"/>"#,
-                ),
-                st = st,
-                x0 = round(hw * 0.2), ny = round(-hh),
-                x1 = round(-hw * 0.6), y1 = round(node.height * 0.1),
-                x2 = round(0.0), x0b = round(-hw * 0.2), hh = round(hh),
-                x3 = round(hw * 0.6), y3 = round(-node.height * 0.1), x4 = round(0.0),
+                r#"<g class="outer-path" transform="translate({},{})">"#,
+                round(-width / 2.0),
+                round(-height),
             );
+            emit_rough_drawable(s, &drawable, false, &st);
+            s.push_str("</g>");
         }
         // Bang / cloud: approximated as an ellipse blob (element + size match).
         NodeShape::Bang | NodeShape::Cloud => {
@@ -963,50 +1134,117 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 st = st, nx = round(-hw), hw = round(hw), hh = round(hh), w = round(2.0 * hw), nw = round(-2.0 * hw),
             );
         }
-        // Curly braces: a left brace, a right brace, or both around the label.
+        // Curly braces (curlyBraceLeft / Right / curlyBraces): stroke-only brace
+        // outline(s) plus an invisible (stroke-opacity 0) rectangle hit-area,
+        // both mermaid `rc.path` with `fill: none`. The dagre bbox pads the body
+        // (w = node.width - 15, h = node.height - 10). Wrapper `<g class="text">`.
         NodeShape::BraceLeft | NodeShape::BraceRight | NodeShape::Braces => {
-            let brace = |s: &mut String, x: f64, dir: f64| {
-                let _ = write!(
-                    s,
-                    concat!(
-                        r#"<path{st} d="M{x0},{ny} q{qb},0 {qb},{q} q0,{q} {qb2},{q} q{nqb2},0 {nqb2},{q} q0,{q} {nqb},{q}"/>"#,
-                    ),
-                    st = st, x0 = round(x), ny = round(-hh),
-                    qb = round(-6.0 * dir), q = round(hh / 2.0), qb2 = round(-6.0 * dir), nqb2 = round(6.0 * dir), nqb = round(6.0 * dir),
-                );
+            // Both-sided braces get 10px more dagre width than a single brace, so
+            // trim an extra 10 to recover the body width.
+            let w = node.width - if matches!(node.shape, NodeShape::Braces) { 25.0 } else { 15.0 };
+            let h = node.height - 10.0;
+            let r = (h * 0.1_f64).max(5.0);
+            let o = rough_options(roughness);
+            let gen = roughr::Generator::new();
+            // A fill:none `rc.path` (only its stroke `<path>` is emitted).
+            let mut none_o = o.clone();
+            none_o.fill = None;
+            // stroke-only emitter wrapped in a `<g>` with optional attrs.
+            let emit_brace = |s: &mut String, pts: &[[f64; 2]], strip_z: bool, gattr: &str| {
+                let mut d = path_from_points(pts);
+                if strip_z {
+                    d = d.replace('Z', "");
+                }
+                let drawable = gen.path(&d, &none_o);
+                let _ = write!(s, "<g{gattr}>");
+                emit_drawable(s, &drawable, false, &st, None, "#9370DB", "1.3");
+                s.push_str("</g>");
             };
-            let _ = write!(s, r#"<g class="outer-path">"#);
-            if !matches!(node.shape, NodeShape::BraceRight) {
-                brace(s, -hw + 6.0, 1.0);
+            match node.shape {
+                NodeShape::BraceLeft => {
+                    let mut pts: Vec<[f64; 2]> = Vec::new();
+                    pts.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 30, -90.0, 0.0));
+                    pts.push([-w / 2.0 - r, r]);
+                    pts.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
+                    pts.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    pts.push([-w / 2.0 - r, -h / 2.0]);
+                    pts.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    let mut rect: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
+                    rect.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    rect.push([-w / 2.0 - r, -r]);
+                    rect.extend(generate_circle_points(w / 2.0 + w * 0.1, -r, r, 20, -180.0, -270.0));
+                    rect.extend(generate_circle_points(w / 2.0 + w * 0.1, r, r, 20, -90.0, -180.0));
+                    rect.push([-w / 2.0 - r, h / 2.0]);
+                    rect.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    rect.push([-w / 2.0, h / 2.0 + r]);
+                    rect.push([w / 2.0, h / 2.0 + r]);
+                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(r));
+                    emit_brace(s, &pts, true, "");
+                    emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
+                    s.push_str("</g>");
+                }
+                NodeShape::BraceRight => {
+                    let mut pts: Vec<[f64; 2]> = Vec::new();
+                    pts.extend(generate_circle_points_pos(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    pts.push([w / 2.0 + r, -r]);
+                    pts.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
+                    pts.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    pts.push([w / 2.0 + r, h / 2.0]);
+                    pts.extend(generate_circle_points_pos(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    let mut rect: Vec<[f64; 2]> = vec![[-w / 2.0, -h / 2.0 - r], [w / 2.0, -h / 2.0 - r]];
+                    rect.extend(generate_circle_points_pos(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    rect.push([w / 2.0 + r, -r]);
+                    rect.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
+                    rect.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    rect.push([w / 2.0 + r, h / 2.0]);
+                    rect.extend(generate_circle_points_pos(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    rect.push([w / 2.0, h / 2.0 + r]);
+                    rect.push([-w / 2.0, h / 2.0 + r]);
+                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(-r));
+                    emit_brace(s, &pts, true, "");
+                    emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
+                    s.push_str("</g>");
+                }
+                _ => {
+                    // Both braces (curlyBraces): right brace, left brace, rect.
+                    let mut left: Vec<[f64; 2]> = Vec::new();
+                    left.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 30, -90.0, 0.0));
+                    left.push([-w / 2.0 - r, r]);
+                    left.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
+                    left.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    left.push([-w / 2.0 - r, -h / 2.0]);
+                    left.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    let mut right: Vec<[f64; 2]> = Vec::new();
+                    right.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, -h / 2.0, r, 20, -90.0, -180.0));
+                    right.push([w / 2.0 - r / 2.0, r]);
+                    right.extend(generate_circle_points(-w / 2.0 - r / 2.0, -r, r, 20, 0.0, 90.0));
+                    right.extend(generate_circle_points(-w / 2.0 - r / 2.0, r, r, 20, -90.0, 0.0));
+                    right.push([w / 2.0 - r / 2.0, -r]);
+                    right.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, h / 2.0, r, 30, -180.0, -270.0));
+                    let mut rect: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
+                    rect.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    rect.push([-w / 2.0 - r, -r]);
+                    rect.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
+                    rect.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    rect.push([-w / 2.0 - r, h / 2.0]);
+                    rect.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    rect.push([-w / 2.0, h / 2.0 + r]);
+                    rect.push([w / 2.0 - r - r / 2.0, h / 2.0 + r]);
+                    rect.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, -h / 2.0, r, 20, -90.0, -180.0));
+                    rect.push([w / 2.0 - r / 2.0, r]);
+                    rect.extend(generate_circle_points(-w / 2.0 - r / 2.0, -r, r, 20, 0.0, 90.0));
+                    rect.extend(generate_circle_points(-w / 2.0 - r / 2.0, r, r, 20, -90.0, 0.0));
+                    rect.push([w / 2.0 - r / 2.0, -r]);
+                    rect.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, h / 2.0, r, 30, -180.0, -270.0));
+                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(r - r / 4.0));
+                    emit_brace(s, &right, true, "");
+                    emit_brace(s, &left, true, "");
+                    emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
+                    s.push_str("</g>");
+                }
             }
-            if !matches!(node.shape, NodeShape::BraceLeft) {
-                brace(s, hw - 6.0, -1.0);
-            }
-            s.push_str("</g>");
         }
     }
-}
-
-/// Emit a rough.js "solid" fill `<path>` for a polygon: `M x y L x y …`
-/// (space-separated). `wrapper_g` callers add the `outer-path` `<g>` themselves;
-/// otherwise the path carries the class directly (see per-shape arms). `evenodd`
-/// adds `fill-rule="evenodd"` (rc.polygon does; rc.path does not). `close`
-/// appends a closing token (e.g. "Z"). mermaid's fill path also carries
-/// `stroke="none" stroke-width="0" fill="#ECECFF"`.
-fn emit_rough_fill(s: &mut String, pts: &[(f64, f64)], evenodd: bool, close: &str, st: &str) {
-    let mut d = String::new();
-    for (i, &(x, y)) in pts.iter().enumerate() {
-        let _ = write!(d, "{}{} {}", if i == 0 { "M" } else { " L" }, round(x), round(y));
-    }
-    if !close.is_empty() {
-        d.push(' ');
-        d.push_str(close);
-    }
-    let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
-    let _ = write!(
-        s,
-        r##"<path d="{d}" stroke="none" stroke-width="0" fill="#ECECFF"{rule}{st}/>"##,
-    );
 }
 
 /// The classic-look `roughr` options for a node shape: solid fill in the theme
@@ -1035,17 +1273,141 @@ fn rough_options(roughness: f64) -> roughr::Options {
 ///
 /// [`Drawable`]: roughr::Drawable
 fn emit_rough_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, st: &str) {
+    emit_drawable(s, drawable, evenodd, st, Some("#ECECFF"), "#9370DB", "1.3");
+}
+
+/// General form of [`emit_rough_drawable`] with explicit colours. When `fill` is
+/// `Some`, a fill `<path>` is emitted (even if the drawable has no fill area, in
+/// which case its `d` is empty — matching rough.js, which still emits the element
+/// whenever `options.fill` is set); when `None`, no fill element is emitted
+/// (rough.js creates none for `fill: "none"`). `sw` is the stroke-width attribute.
+fn emit_drawable(
+    s: &mut String,
+    drawable: &roughr::Drawable,
+    evenodd: bool,
+    st: &str,
+    fill: Option<&str>,
+    stroke: &str,
+    sw: &str,
+) {
+    if let Some(fc) = fill {
+        let fill_d = drawable.fill_path(None);
+        let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+        let _ = write!(
+            s,
+            r##"<path d="{fill_d}" stroke="none" stroke-width="0" fill="{fc}"{rule}{st}/>"##,
+        );
+    }
+    let stroke_d = drawable.stroke_path(None);
+    let _ = write!(
+        s,
+        r##"<path d="{stroke_d}" stroke="{stroke}" stroke-width="{sw}" fill="none" stroke-dasharray="0 0"{st}/>"##,
+    );
+}
+
+/// Emit a `roughr` [`Drawable`] as mermaid's `mergePaths` output: a `<g>` holding
+/// a single `<path>` whose `d` is the fill path followed by the stroke path, with
+/// the fill and stroke attributes merged onto that one element (used by the
+/// stacked-rectangle / multi-process handler for the classic look).
+///
+/// [`Drawable`]: roughr::Drawable
+fn emit_merged(s: &mut String, drawable: &roughr::Drawable, st: &str) {
     let fill = drawable.fill_path(None);
     let stroke = drawable.stroke_path(None);
-    let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+    let d = if fill.is_empty() { stroke } else { format!("{fill} {stroke}") };
     let _ = write!(
         s,
-        r##"<path d="{fill}" stroke="none" stroke-width="0" fill="#ECECFF"{rule}{st}/>"##,
+        r##"<g><path d="{d}" fill="#ECECFF" fill-opacity="1" stroke="#9370DB" stroke-width="1.3" stroke-opacity="1"{st}/></g>"##,
     );
-    let _ = write!(
-        s,
-        r##"<path d="{stroke}" stroke="#9370DB" stroke-width="1.3" fill="none" stroke-dasharray="0 0"{st}/>"##,
-    );
+}
+
+/// Port of mermaid's base `generateCirclePoints`: sample `n` points on a circle
+/// arc (degrees), **negating** each coordinate (mermaid's base variant pushes
+/// `{-x, -y}`). Used by delay / curved-trapezoid / notched-pentagon families.
+fn generate_circle_points(
+    cx: f64,
+    cy: f64,
+    r: f64,
+    n: usize,
+    start_deg: f64,
+    end_deg: f64,
+) -> Vec<[f64; 2]> {
+    let start = start_deg * std::f64::consts::PI / 180.0;
+    let end = end_deg * std::f64::consts::PI / 180.0;
+    let step = (end - start) / (n as f64 - 1.0);
+    (0..n)
+        .map(|i| {
+            let a = start + i as f64 * step;
+            [-(cx + r * a.cos()), -(cy + r * a.sin())]
+        })
+        .collect()
+}
+
+/// Non-negating circle-point sampler (mermaid's `generateCirclePoints` variant
+/// used by the right curly brace, which pushes `{x, y}` rather than `{-x, -y}`).
+fn generate_circle_points_pos(
+    cx: f64,
+    cy: f64,
+    r: f64,
+    n: usize,
+    start_deg: f64,
+    end_deg: f64,
+) -> Vec<[f64; 2]> {
+    let start = start_deg * std::f64::consts::PI / 180.0;
+    let end = end_deg * std::f64::consts::PI / 180.0;
+    let step = (end - start) / (n as f64 - 1.0);
+    (0..n)
+        .map(|i| {
+            let a = start + i as f64 * step;
+            [cx + r * a.cos(), cy + r * a.sin()]
+        })
+        .collect()
+}
+
+/// Port of mermaid's `generateArcPoints`: sample 20 points along the elliptical
+/// arc between `(x1,y1)` and `(x2,y2)` with radii `rx,ry`. Used by bow-tie rect.
+fn generate_arc_points(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    rx: f64,
+    ry: f64,
+    clockwise: bool,
+) -> Vec<[f64; 2]> {
+    let num = 20;
+    let mid_x = (x1 + x2) / 2.0;
+    let mid_y = (y1 + y2) / 2.0;
+    let angle = (y2 - y1).atan2(x2 - x1);
+    let dx = (x2 - x1) / 2.0;
+    let dy = (y2 - y1) / 2.0;
+    let distance = ((dx / rx).powi(2) + (dy / ry).powi(2)).sqrt();
+    let scaled = (1.0 - distance * distance).max(0.0).sqrt();
+    let sign = if clockwise { -1.0 } else { 1.0 };
+    let center_x = mid_x + scaled * ry * angle.sin() * sign;
+    let center_y = mid_y - scaled * rx * angle.cos() * sign;
+    let start = ((y1 - center_y) / ry).atan2((x1 - center_x) / rx);
+    let end = ((y2 - center_y) / ry).atan2((x2 - center_x) / rx);
+    let mut range = end - start;
+    if clockwise && range < 0.0 {
+        range += 2.0 * std::f64::consts::PI;
+    }
+    if !clockwise && range > 0.0 {
+        range -= 2.0 * std::f64::consts::PI;
+    }
+    (0..num)
+        .map(|i| {
+            let t = i as f64 / (num as f64 - 1.0);
+            let a = start + t * range;
+            [center_x + rx * a.cos(), center_y + ry * a.sin()]
+        })
+        .collect()
+}
+
+/// mermaid's arc sagitta (chord depth) used to size the bow-tie's concave sides.
+fn arc_sagitta(chord: f64, rx: f64, ry: f64) -> f64 {
+    let (major, minor) = if rx >= ry { (rx, ry) } else { (ry, rx) };
+    minor * (1.0 - (1.0 - (chord / major / 2.0).powi(2)).sqrt())
 }
 
 /// Port of mermaid's `generateFullSineWavePoints`: sample `50` steps of a sine
