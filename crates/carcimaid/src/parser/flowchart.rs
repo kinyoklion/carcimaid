@@ -246,9 +246,9 @@ fn parse_link_style(rest: &str, chart: &mut Flowchart) {
         return;
     }
     if spec.trim() == "default" {
-        for e in &mut chart.edges {
-            e.link_style = decls.clone();
-        }
+        // Applies to every edge; kept separate so a per-index linkStyle appends
+        // to it rather than replacing it (mermaid concatenates default + index).
+        chart.link_style_default = decls;
     } else {
         for idx in spec.split(',').filter_map(|i| i.trim().parse::<usize>().ok()) {
             if let Some(e) = chart.edges.get_mut(idx) {
@@ -445,6 +445,12 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                     };
                     ops.push(EdgeOp { style, start, end, label });
                 } else {
+                    // The odd/flag shape `id>text]` opens with `>` and closes
+                    // with `]`; count it as a bracket so the trailing `]` keeps
+                    // `depth` balanced and doesn't hide a following link operator.
+                    if c == '>' {
+                        depth += 1;
+                    }
                     cur.push(c);
                     i += clen;
                 }
@@ -662,6 +668,15 @@ fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>, Option<
         let inner = endpoint[at + 2..].trim().strip_suffix('}').unwrap_or(&endpoint[at + 2..]);
         let (shape, label) = parse_at_metadata(inner);
         return (id, shape, label, class);
+    }
+    // Odd/flag shape `id>text]`: a `>` opener (before any normal bracket) with a
+    // `]` closer. mermaid renders it as a notched-left path; we approximate it.
+    if let Some(gt) = endpoint.find('>') {
+        if endpoint.ends_with(']') && !endpoint[..gt].contains(['[', '(', '{']) {
+            let id = endpoint[..gt].trim().to_string();
+            let inner = &endpoint[gt + 1..endpoint.len() - 1];
+            return (id, NodeShape::Odd, Some(unquote(inner).to_string()), class);
+        }
     }
     // Find where the shape bracket (if any) begins.
     let open = endpoint.find(['[', '(', '{']);

@@ -116,6 +116,9 @@ pub struct PlacedEdge {
     /// Edge stroke colour (from `linkStyle`), which selects a colour-matched
     /// arrow marker. `None` for the default marker.
     pub stroke: Option<String>,
+    /// Edge label colour (the last `color:` in the effective linkStyle), painting
+    /// the label rect (`color:X !important`) and text (`fill:X !important`).
+    pub label_color: Option<String>,
     /// The enclosing extracted subgraph (render scope), or `None` for the root.
     pub home: Option<usize>,
 }
@@ -191,6 +194,12 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
         NodeShape::Trapezoid | NodeShape::InvTrapezoid => {
             let h = POLY_H + extra;
             (text_w + 13.65 + h, h)
+        }
+        // Odd/flag shape: rectangle body plus a left notch ~h/2 deep. Approximated
+        // as a rect; height matches the polygon family (34 for one line).
+        NodeShape::Odd => {
+            let h = POLY_H + extra;
+            (text_w + 14.0 + h / 2.0, h)
         }
         // TODO: stadium is a path shape; still approximated as a rounded rect.
         NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
@@ -602,21 +611,26 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         .map(|(i, points)| {
             let e = &chart.edges[*i];
             let label_pos = e.label.as_ref().map(|_| midpoint_by_length(points));
-            // Resolve linkStyle: the path style is the declarations plus fill:none;
-            // the stroke value selects a colour-matched arrow marker.
-            let (style, stroke) = if e.link_style.is_empty() {
-                (String::new(), None)
-            } else {
-                let stroke = e
-                    .link_style
-                    .iter()
-                    .find_map(|d| d.strip_prefix("stroke:").map(|v| v.trim().to_string()));
-                let mut decls = e.link_style.clone();
-                if !decls.iter().any(|d| d.trim_start().starts_with("fill:")) {
-                    decls.push("fill:none".into());
-                }
-                (decls.join(";"), stroke)
-            };
+            // Resolve linkStyle. The effective declarations are the global
+            // `linkStyle default` decls followed, for an edge with its own
+            // per-index linkStyle, by those decls plus `fill:none` (mermaid only
+            // adds fill:none to an edge's own style, not to the default). The
+            // last `stroke:`/`color:` win — stroke selects a colour-matched arrow
+            // marker, color paints the edge label.
+            let mut decls = chart.link_style_default.clone();
+            if !e.link_style.is_empty() {
+                decls.extend(e.link_style.iter().cloned());
+                decls.push("fill:none".into());
+            }
+            let stroke = decls
+                .iter()
+                .rev()
+                .find_map(|d| d.strip_prefix("stroke:").map(|v| v.trim().to_string()));
+            let label_color = decls
+                .iter()
+                .rev()
+                .find_map(|d| d.strip_prefix("color:").map(|v| v.trim().to_string()));
+            let style = decls.join(";");
             let from_cluster = chart.nodes[e.from].subgraph_ref.is_some();
             let to_cluster = chart.nodes[e.to].subgraph_ref.is_some();
             PlacedEdge {
@@ -633,6 +647,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
                 label_pos,
                 style,
                 stroke,
+                label_color,
                 home: endpoint_home(chart, &ext, e.from),
             }
         })

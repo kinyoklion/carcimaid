@@ -364,7 +364,7 @@ fn render_shape(s: &mut String, node: &PlacedNode) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     match node.shape {
-        NodeShape::Rectangle | NodeShape::DataStore => {
+        NodeShape::Rectangle | NodeShape::DataStore | NodeShape::Odd => {
             // DataStore (`@{shape: datastore}`) is the same rect but with its
             // vertical sides dashed away: a `stroke-dasharray` of the rect's own
             // width/height draws only the top and bottom edges.
@@ -750,14 +750,23 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
                 round(ly),
                 round(-bg_h / 2.0 + 1.0), // -10.5 for a single 23px line
             );
+            // A linkStyle `color:` paints the label: the background rect carries
+            // `color:X !important`, the text `fill:X !important` (render_text maps
+            // color→fill), matching mermaid.
+            let label_style = edge
+                .label_color
+                .as_ref()
+                .map(|c| format!("color:{c} !important"))
+                .unwrap_or_default();
             let _ = write!(
                 s,
-                r#"<rect class="background" x="{}" y="-1" width="{}" height="{}"/>"#,
+                r#"<rect class="background"{} x="{}" y="-1" width="{}" height="{}"/>"#,
+                style_attr(&label_style),
                 round(-bg_w / 2.0),
                 round(bg_w),
                 round(bg_h),
             );
-            render_text(s, Some(label), true, "");
+            render_text(s, Some(label), true, &label_style);
             s.push_str("</g></g></g>");
         }
         None => {

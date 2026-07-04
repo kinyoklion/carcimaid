@@ -41,6 +41,9 @@ pub struct Flowchart {
     pub acc_descr: Option<String>,
     /// `classDef <name> <props>` definitions: name → CSS declarations (`k:v`).
     pub class_defs: std::collections::HashMap<String, Vec<String>>,
+    /// `linkStyle default <props>` declarations — applied to every edge (before
+    /// any per-index [`Edge::link_style`]), with no `fill:none` of their own.
+    pub link_style_default: Vec<String>,
     /// `config.flowchart.nodeSpacing` from YAML frontmatter → dagre `nodesep`
     /// (space between nodes in the same rank). `None` = mermaid default (50).
     pub node_spacing: Option<f64>,
@@ -107,6 +110,9 @@ pub enum NodeShape {
     /// rectangle drawn with only its top and bottom edges (via a
     /// `stroke-dasharray` of its own width/height). Distinct from [`Cylinder`].
     DataStore,
+    /// `A>text]` — the "odd"/flag shape (a rectangle with a notched left edge).
+    /// mermaid draws it as a bezier `<path>`; we approximate it as a rectangle.
+    Odd,
 }
 
 /// A flowchart node.
