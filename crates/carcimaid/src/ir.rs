@@ -41,6 +41,12 @@ pub struct Flowchart {
     pub acc_descr: Option<String>,
     /// `classDef <name> <props>` definitions: name → CSS declarations (`k:v`).
     pub class_defs: std::collections::HashMap<String, Vec<String>>,
+    /// `config.flowchart.nodeSpacing` from YAML frontmatter → dagre `nodesep`
+    /// (space between nodes in the same rank). `None` = mermaid default (50).
+    pub node_spacing: Option<f64>,
+    /// `config.flowchart.rankSpacing` from YAML frontmatter → dagre `ranksep`
+    /// (space between ranks). `None` = mermaid default (50).
+    pub rank_spacing: Option<f64>,
 }
 
 impl Flowchart {
@@ -114,6 +120,10 @@ pub struct Node {
     pub classes: Vec<String>,
     /// Direct style declarations (`style <id> <props>`), as `k:v` strings.
     pub styles: Vec<String>,
+    /// When this "node" is actually a reference to a subgraph used as an edge
+    /// endpoint (`X --> Y` where `X`/`Y` are subgraph names), the index of that
+    /// subgraph. Such nodes are not rendered; the edge attaches to the cluster.
+    pub subgraph_ref: Option<usize>,
 }
 
 /// The line style of an edge.

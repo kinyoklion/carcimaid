@@ -95,6 +95,15 @@ pub struct PlacedNode {
 pub struct PlacedEdge {
     pub from: usize,
     pub to: usize,
+    /// Source/target ids as used in the edge id (`L_<from>_<to>_0`). Held
+    /// explicitly because a subgraph-reference endpoint has no `PlacedNode`.
+    pub from_id: String,
+    pub to_id: String,
+    /// When an endpoint names a subgraph (`X --> Y`), the edge attaches to that
+    /// cluster rather than a node; `from`/`to` are then meaningless. dagre has
+    /// already clipped the route to the (rectangular) cluster border.
+    pub from_cluster: bool,
+    pub to_cluster: bool,
     pub label: Option<String>,
     pub points: Vec<(f64, f64)>,
     /// Arrowhead type at the `from`/`to` ends.
@@ -259,6 +268,27 @@ fn home_node(chart: &Flowchart, ext: &[bool], n: usize) -> Option<usize> {
     node_ancestors(chart, n).into_iter().find(|&sg| ext[sg])
 }
 
+/// The scope (owner) an edge endpoint is placed in. For a subgraph-reference
+/// endpoint (an edge naming a subgraph) that is the scope holding its collapsed
+/// cluster node; otherwise the node's own home scope.
+fn endpoint_home(chart: &Flowchart, ext: &[bool], n: usize) -> Option<usize> {
+    match chart.nodes[n].subgraph_ref {
+        Some(s) => home_sg(chart, ext, s),
+        None => home_node(chart, ext, n),
+    }
+}
+
+/// The dagre node key an edge endpoint attaches to: the collapsed `s{sg}` node
+/// for an extracted subgraph reference, the `c{sg}` cluster for a non-extracted
+/// one, else the ordinary `n{node}`.
+fn endpoint_key(chart: &Flowchart, ext: &[bool], n: usize) -> String {
+    match chart.nodes[n].subgraph_ref {
+        Some(s) if ext[s] => format!("s{s}"),
+        Some(s) => format!("c{s}"),
+        None => format!("n{n}"),
+    }
+}
+
 /// mermaid's cluster render order: a DFS of the subgraph tree visiting siblings
 /// in reverse definition order, parents before children. Returns a rank per
 /// subgraph (lower renders first).
@@ -341,6 +371,9 @@ fn layout_scope(
         g.set_node(format!("c{o}"), Some(NodeLabel::default()));
     }
     for n in 0..chart.nodes.len() {
+        if chart.nodes[n].subgraph_ref.is_some() {
+            continue; // stands in for a subgraph; the cluster node carries it
+        }
         if home_node(chart, ext, n) == owner {
             let (w, h) = sizes[n];
             g.set_node(format!("n{n}"), Some(NodeLabel { width: w, height: h, ..Default::default() }));
@@ -365,6 +398,9 @@ fn layout_scope(
         _ => None,
     };
     for n in 0..chart.nodes.len() {
+        if chart.nodes[n].subgraph_ref.is_some() {
+            continue;
+        }
         if home_node(chart, ext, n) == owner {
             if let Some(pk) = parent_key(chart.nodes[n].subgraph) {
                 g.set_parent(&format!("n{n}"), Some(&pk));
@@ -381,14 +417,14 @@ fn layout_scope(
         }
     }
     for (i, e) in chart.edges.iter().enumerate() {
-        if home_node(chart, ext, e.from) == owner && home_node(chart, ext, e.to) == owner {
+        if endpoint_home(chart, ext, e.from) == owner && endpoint_home(chart, ext, e.to) == owner {
             let (lw, lh) = match &e.label {
                 Some(l) => (crate::text::measure_width(l, FONT_SIZE), crate::text::line_height(FONT_SIZE)),
                 None => (0.0, 0.0),
             };
             g.set_edge(
-                format!("n{}", e.from),
-                format!("n{}", e.to),
+                endpoint_key(chart, ext, e.from),
+                endpoint_key(chart, ext, e.to),
                 Some(EdgeLabel { width: lw, height: lh, ..Default::default() }),
                 Some(i.to_string().as_str()),
             );
@@ -399,7 +435,7 @@ fn layout_scope(
         &mut g,
         Some(LayoutOptions {
             rankdir: rank_dir(dir),
-            nodesep: NODE_SEP,
+            nodesep: chart.node_spacing.unwrap_or(NODE_SEP),
             ranksep,
             edgesep: EDGE_SEP,
             marginx: MARGIN,
@@ -411,6 +447,9 @@ fn layout_scope(
 
     let mut out = Scope::default();
     for n in 0..chart.nodes.len() {
+        if chart.nodes[n].subgraph_ref.is_some() {
+            continue;
+        }
         if home_node(chart, ext, n) == owner {
             let node = g.node(&format!("n{n}"));
             out.nodes.push((n, node.and_then(|x| x.x).unwrap_or(0.0), node.and_then(|x| x.y).unwrap_or(0.0)));
@@ -450,8 +489,9 @@ fn layout_scope(
         }
     }
     for (i, e) in chart.edges.iter().enumerate() {
-        if home_node(chart, ext, e.from) == owner && home_node(chart, ext, e.to) == owner {
-            if let Some(el) = g.edge(&format!("n{}", e.from), &format!("n{}", e.to), Some(&i.to_string())) {
+        if endpoint_home(chart, ext, e.from) == owner && endpoint_home(chart, ext, e.to) == owner {
+            let (fk, tk) = (endpoint_key(chart, ext, e.from), endpoint_key(chart, ext, e.to));
+            if let Some(el) = g.edge(&fk, &tk, Some(&i.to_string())) {
                 let pts: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
                 if !pts.is_empty() {
                     out.edges.push((i, pts));
@@ -503,7 +543,15 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     // Per-subgraph render offset (relative to the parent scope), filled in by
     // layout, then composed to absolute offsets below.
     let mut offsets = vec![(0.0, 0.0); chart.subgraphs.len()];
-    let scope = layout_scope(chart, &sizes, &ext, None, chart.direction, RANK_SEP, &mut offsets);
+    let scope = layout_scope(
+        chart,
+        &sizes,
+        &ext,
+        None,
+        chart.direction,
+        chart.rank_spacing.unwrap_or(RANK_SEP),
+        &mut offsets,
+    );
     // Compose parent-relative offsets into absolute scope offsets: a subgraph's
     // absolute offset is its own relative offset plus its parent scope's.
     let mut scope_offsets = vec![(0.0, 0.0); chart.subgraphs.len()];
@@ -567,9 +615,15 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
                 }
                 (decls.join(";"), stroke)
             };
+            let from_cluster = chart.nodes[e.from].subgraph_ref.is_some();
+            let to_cluster = chart.nodes[e.to].subgraph_ref.is_some();
             PlacedEdge {
-                from: node_at[e.from],
-                to: node_at[e.to],
+                from: if from_cluster { 0 } else { node_at[e.from] },
+                to: if to_cluster { 0 } else { node_at[e.to] },
+                from_id: chart.nodes[e.from].id.clone(),
+                to_id: chart.nodes[e.to].id.clone(),
+                from_cluster,
+                to_cluster,
                 label: e.label.clone(),
                 points: points.clone(),
                 arrow_start: e.arrow_start,
@@ -577,7 +631,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
                 label_pos,
                 style,
                 stroke,
-                home: home_node(chart, &ext, e.from),
+                home: endpoint_home(chart, &ext, e.from),
             }
         })
         .collect();

@@ -88,7 +88,29 @@ pub fn parse(source: &str) -> Result<Flowchart> {
         }
     }
 
+    resolve_subgraph_refs(&mut chart);
     Ok(chart)
+}
+
+/// Mark any node whose id matches a subgraph id as a subgraph reference. This
+/// happens when a subgraph name is used as an edge endpoint (`X --> Y`): the
+/// edge is parsed before the `subgraph X`/`subgraph Y` blocks, so `ensure_node`
+/// creates a phantom node for it. mermaid renders no node in that case — the
+/// edge attaches to the cluster — so we flag the node and let layout/render
+/// treat the endpoint as the subgraph. (A subgraph id shadows a node id.)
+fn resolve_subgraph_refs(chart: &mut Flowchart) {
+    use std::collections::HashMap;
+    let sg_by_id: HashMap<String, usize> = chart
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.clone(), i))
+        .collect();
+    for node in &mut chart.nodes {
+        if let Some(&s) = sg_by_id.get(&node.id) {
+            node.subgraph_ref = Some(s);
+        }
+    }
 }
 
 /// Split source into statements. A statement ends at `;` or a newline, but only
@@ -542,7 +564,7 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) ->
         idx
     } else {
         let label = label.unwrap_or_else(|| id.clone());
-        chart.nodes.push(Node { id, label, shape, subgraph: current, classes: Vec::new(), styles: Vec::new() });
+        chart.nodes.push(Node { id, label, shape, subgraph: current, classes: Vec::new(), styles: Vec::new(), subgraph_ref: None });
         chart.nodes.len() - 1
     };
     // Inline `id:::className` class assignment.
@@ -706,7 +728,7 @@ mod tests {
         assert_eq!(chart.nodes[0].shape, NodeShape::Rectangle);
         assert_eq!(chart.nodes[1].shape, NodeShape::Rhombus);
         assert_eq!(chart.edges.len(), 1);
-        assert!(chart.edges[0].arrow);
+        assert_eq!(chart.edges[0].arrow_end, ArrowType::Point);
     }
 
     #[test]

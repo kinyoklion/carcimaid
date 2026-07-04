@@ -12,6 +12,8 @@ pub mod flowchart;
 /// Parse mermaid source into a [`Diagram`].
 pub fn parse(source: &str) -> Result<Diagram> {
     let title = frontmatter_title(source);
+    let node_spacing = frontmatter_flowchart_num(source, "nodeSpacing");
+    let rank_spacing = frontmatter_flowchart_num(source, "rankSpacing");
     let source = strip_frontmatter(source);
     let header = first_keyword(source)
         .ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
@@ -20,10 +22,42 @@ pub fn parse(source: &str) -> Result<Diagram> {
         "flowchart" | "graph" => {
             let mut f = flowchart::parse(source)?;
             f.title = title; // visible title from frontmatter
+            f.node_spacing = node_spacing;
+            f.rank_spacing = rank_spacing;
             Ok(Diagram::Flowchart(f))
         }
         other => Err(Error::Unsupported(format!("diagram type `{other}`"))),
     }
+}
+
+/// Read a numeric value from the frontmatter `config.flowchart.<key>` block,
+/// e.g. `nodeSpacing`/`rankSpacing`. We only need the `flowchart:` sub-map, so
+/// this is a lightweight scan rather than a full YAML parse: find the
+/// `flowchart:` line inside `config:`, then the first `  <key>: <num>` under it.
+fn frontmatter_flowchart_num(source: &str, key: &str) -> Option<f64> {
+    let mut lines = source.lines().skip_while(|l| l.trim().is_empty());
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut in_flowchart = false;
+    for l in lines {
+        let t = l.trim();
+        if t == "---" {
+            break;
+        }
+        // `flowchart:` opens the sub-map; any other top-level `config`/`x:` key
+        // (no leading indent beyond the config block) closes it.
+        if t == "flowchart:" {
+            in_flowchart = true;
+            continue;
+        }
+        if in_flowchart {
+            if let Some(v) = t.strip_prefix(key).and_then(|r| r.trim().strip_prefix(':')) {
+                return v.trim().parse().ok();
+            }
+        }
+    }
+    None
 }
 
 /// Extract the `title:` from a leading YAML frontmatter block, if present.

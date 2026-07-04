@@ -501,8 +501,8 @@ fn emit_polygon(s: &mut String, points: &[(f64, f64)], tx: f64, ty: f64, style: 
 
 /// `L_<fromId>_<toId>_0`, mermaid's stable edge id (uses node ids, not indices).
 /// Escaped so it is always a valid XML attribute value.
-fn edge_id(edge: &PlacedEdge, nodes: &[PlacedNode]) -> String {
-    escape(&format!("L_{}_{}_0", nodes[edge.from].id, nodes[edge.to].id))
+fn edge_id(edge: &PlacedEdge, _nodes: &[PlacedNode]) -> String {
+    escape(&format!("L_{}_{}_0", edge.from_id, edge.to_id))
 }
 
 /// Arrow inset: mermaid shortens the path at the arrow end by this many px so
@@ -515,12 +515,19 @@ fn render_edge_path(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
     // bounding box; non-rect shapes are inset, so an unclipped edge detaches
     // from a diamond/circle/etc.). mermaid does the same via shape intersection.
     if points.len() >= 2 {
-        if let Some(p) = clip_to_shape(&nodes[edge.from], points[1]) {
-            points[0] = p;
+        // Cluster endpoints (a subgraph named as an edge end) are rectangular, so
+        // dagre's route already terminates on the cluster border — only node
+        // endpoints need shape-intersection clipping.
+        if !edge.from_cluster {
+            if let Some(p) = clip_to_shape(&nodes[edge.from], points[1]) {
+                points[0] = p;
+            }
         }
         let n = points.len();
-        if let Some(p) = clip_to_shape(&nodes[edge.to], points[n - 2]) {
-            points[n - 1] = p;
+        if !edge.to_cluster {
+            if let Some(p) = clip_to_shape(&nodes[edge.to], points[n - 2]) {
+                points[n - 1] = p;
+            }
         }
     }
     // Arrowheads shorten the path at each end so the marker sits flush.
