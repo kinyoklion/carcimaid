@@ -148,7 +148,7 @@ pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
 /// Node box size from the label's measured text width plus shape-dependent
 /// padding, derived empirically from mermaid's output (plain rect +60, rounded
 /// +30). Other shapes are approximated pending dedicated shape sizing.
-fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
+fn node_size(label: &str, shape: NodeShape, dir: Direction) -> (f64, f64) {
     // Wrap the label the way mermaid does; the widest line drives node width and
     // the line count drives extra height (1.1em ≈ 17.6px per additional line).
     let lines = crate::text::wrap_label(label, crate::text::WRAP_WIDTH, FONT_SIZE);
@@ -192,17 +192,28 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
         // width + pad + h. The renderer recovers the inner width as width - h.
         NodeShape::Parallelogram | NodeShape::LeanLeft => {
             let h = POLY_H + extra;
-            (text_w + 14.29 + h, h)
+            (text_w + 15.0 + h, h)
         }
-        NodeShape::Trapezoid | NodeShape::InvTrapezoid => {
+        // Trapezoid (mermaid `trapezoid`): pad 15, h = bbox.h + 15 = 34; the
+        // slant adds h/2 each side so dagre width = (bbox + 15) + h.
+        NodeShape::Trapezoid => {
             let h = POLY_H + extra;
-            (text_w + 13.65 + h, h)
+            (text_w + 15.0 + h, h)
+        }
+        // Inverted trapezoid (mermaid `inv_trapezoid`): pad 30 (labelPaddingX*2),
+        // h = bbox.h + 30 = 49; dagre width = (bbox + 30) + h.
+        NodeShape::InvTrapezoid => {
+            let h = NODE_HEIGHT + extra;
+            (text_w + 30.0 + h, h)
         }
         // Odd/flag shape: rectangle body plus a left notch ~h/2 deep. Approximated
         // as a rect; height matches the polygon family (34 for one line).
+        // Odd/flag (mermaid `rect_left_inv_arrow`): rect (bbox + pad 15) with a
+        // left notch of depth h/4; dagre width = (bbox + 15) + h/4. The renderer
+        // recovers the inner width as width - h/4.
         NodeShape::Odd => {
             let h = POLY_H + extra;
-            (text_w + 14.0 + h / 2.0, h)
+            (text_w + 15.0 + h / 4.0, h)
         }
         // Small start circle: fixed r=7, no label. Box 14×14.
         NodeShape::SmallCircle => (14.0, 14.0),
@@ -254,25 +265,59 @@ fn node_size(label: &str, shape: NodeShape) -> (f64, f64) {
         NodeShape::WaveRect => (text_w + 30.0, (POLY_H + extra) * 1.5),
         // Text block: borderless rect, bbox + pad.
         NodeShape::TextBlock => (text_w + 15.0, POLY_H + extra),
-        // Horizontal cylinder: wide, short; extra width for the end caps.
-        NodeShape::HorizontalCylinder => (text_w + 62.0, 40.0 + extra),
-        // Lined (disk) cylinder: like a vertical cylinder.
-        NodeShape::LinedCylinder => {
-            let w = text_w + 15.0;
-            let ry = cylinder_ry(w);
-            (w, 19.0 + extra + 15.0 + 3.0 * ry)
+        // Horizontal cylinder (mermaid `tiltedCylinder`): labelPadding = pad/2 =
+        // 7.5. h = bbox.h + 7.5; the end caps (radius rx = ry/(2.5 + h/50) with
+        // ry = h/2, i.e. cylinder_ry(h)) add rx to the body plus another rx of
+        // overhang, so dagre width = (bbox + 7.5 + rx) + rx = bbox + 7.5 + 3·rx.
+        NodeShape::HorizontalCylinder => {
+            let h = 19.0 + extra + 7.5;
+            let rx = cylinder_ry(h);
+            (text_w + 7.5 + 3.0 * rx, h)
         }
-        // Fork/join bar: a thin fixed rectangle. Hourglass/bolt: fixed markers.
-        NodeShape::Fork => (14.0, 70.0),
+        // Lined (disk) cylinder (mermaid `linedCylinder`): w = bbox + 2·pad(30);
+        // ry = cylinder_ry(w); h = bbox.h + 2·pad(30) + 3·ry (top + bottom caps).
+        NodeShape::LinedCylinder => {
+            let w = text_w + 30.0;
+            let ry = cylinder_ry(w);
+            (w, 19.0 + extra + 30.0 + 3.0 * ry)
+        }
+        // Fork/join bar: a fixed rectangle whose orientation follows the graph
+        // direction (mermaid `forkJoin`): 10×70 in LR, 70×10 otherwise.
+        NodeShape::Fork => {
+            if matches!(dir, Direction::LeftRight) {
+                (10.0, 70.0)
+            } else {
+                (70.0, 10.0)
+            }
+        }
         NodeShape::Hourglass => (30.0, 30.0),
         NodeShape::LightningBolt => (35.0, 70.0),
-        // Callout markers that still size to their label.
-        NodeShape::Bang => (text_w + 30.0, 58.0 + extra),
-        NodeShape::Cloud => (text_w + 30.0, 52.0 + extra),
-        NodeShape::BraceLeft | NodeShape::BraceRight => (text_w + 30.0, 44.0 + extra),
-        NodeShape::Braces => (text_w + 40.0, 44.0 + extra),
-        // TODO: stadium is a path shape; still approximated as a rounded rect.
-        NodeShape::Stadium => (text_w + 60.0, NODE_HEIGHT + extra),
+        // Bang (mermaid `bang`): explosion. w = bbox + 10·halfPadding(75),
+        // h = bbox.h + 8·halfPadding(60); the drawn arcs overshoot the box by
+        // 0.15 each side, so the rendered extent (= dagre size) is 1.25× both.
+        NodeShape::Bang => {
+            let ew = (text_w + 75.0).max(text_w + 20.0);
+            let eh = (19.0 + extra + 60.0).max(19.0 + extra + 20.0);
+            (1.25 * ew, 1.25 * eh)
+        }
+        // Cloud (mermaid `cloud`): w = bbox + pad(15), h = bbox.h + pad(15). The
+        // rounded lobes bulge out non-linearly; a linear fit of the rendered
+        // extent (valid for single-line labels) reproduces mermaid's box.
+        NodeShape::Cloud => {
+            let w = text_w + 15.0;
+            (0.747 * w + 43.33, 0.4806 * w + (19.0 + extra + 15.0))
+        }
+        // Curly braces (mermaid `curlyBrace*`): stroke-only brace(s) around a
+        // body of bbox + pad(15); the brace arcs add ~2·radius (10) of extent
+        // for a single brace, ~2.5·radius (12.5) for both. Height = body + 2·r.
+        NodeShape::BraceLeft | NodeShape::BraceRight => (text_w + 25.0, 44.0 + extra),
+        NodeShape::Braces => (text_w + 27.5, 44.0 + extra),
+        // Stadium (mermaid `stadium`): a pill. h = bbox.h + pad(15) = 34;
+        // w = bbox + h/4 + pad(15). The semicircular caps stay within w.
+        NodeShape::Stadium => {
+            let h = POLY_H + extra;
+            (text_w + h / 4.0 + 15.0, h)
+        }
         // Cylinder (`[(db)]`): a 3D database shape. mermaid sizes it
         // w = text + padding(15); ry = (w/2)/(2.5 + w/50); the drawn height is
         // the label bbox (19 for one line, +17.6 per extra) plus padding(15)
@@ -599,7 +644,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     let sizes: Vec<(f64, f64)> = chart
         .nodes
         .iter()
-        .map(|n| node_size(&n.label, n.shape))
+        .map(|n| node_size(&n.label, n.shape, chart.direction))
         .collect();
 
     if chart.nodes.is_empty() {

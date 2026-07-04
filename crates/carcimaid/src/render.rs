@@ -1283,12 +1283,13 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         }
         // Curly braces (curlyBraceLeft / Right / curlyBraces): stroke-only brace
         // outline(s) plus an invisible (stroke-opacity 0) rectangle hit-area,
-        // both mermaid `rc.path` with `fill: none`. The dagre bbox pads the body
-        // (w = node.width - 15, h = node.height - 10). Wrapper `<g class="text">`.
+        // both mermaid `rc.path` with `fill: none`. The dagre bbox adds the brace
+        // arc extent to the body (w = node.width - 10 for one brace, - 12.5 for
+        // both; h = node.height - 10). Wrapper `<g class="text">`.
         NodeShape::BraceLeft | NodeShape::BraceRight | NodeShape::Braces => {
-            // Both-sided braces get 10px more dagre width than a single brace, so
-            // trim an extra 10 to recover the body width.
-            let w = node.width - if matches!(node.shape, NodeShape::Braces) { 25.0 } else { 15.0 };
+            // Both-sided braces get 2.5px more dagre width than a single brace, so
+            // trim an extra 2.5 to recover the body width.
+            let w = node.width - if matches!(node.shape, NodeShape::Braces) { 12.5 } else { 10.0 };
             let h = node.height - 10.0;
             let r = (h * 0.1_f64).max(5.0);
             let o = rough_options(roughness);
