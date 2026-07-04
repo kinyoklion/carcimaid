@@ -4,6 +4,7 @@ members = [
     "crates/carcimaid",
     "crates/carcimaid-cli",
     "crates/compliance",
+    "crates/roughr",
 ]
 
 [workspace.package]

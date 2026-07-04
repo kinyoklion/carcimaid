@@ -1,0 +1,11 @@
+[package]
+name = "roughr"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+authors = ["Ryan Lamb"]
+description = "A faithful, self-contained Rust port of the subset of rough.js 4.6.6 that mermaid uses to render the hand-drawn look. Derivative work of rough.js (c) 2019 Preet Shihn, MIT. Deterministic by default (non-zero seed)."
+
+# Pure Rust, no external dependencies.
+[dependencies]
