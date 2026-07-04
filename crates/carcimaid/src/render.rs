@@ -314,15 +314,30 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
 }
 
 fn render_node(s: &mut String, node: &PlacedNode, roughness: f64) {
-    let _ = write!(
-        s,
-        r#"<g class="node default{}" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
-        class_suffix(&node.classes),
-        ID,
-        escape(&node.id),
-        round(node.cx),
-        round(node.cy),
-    );
+    // The hand-drawn look uses mermaid's rough-node group (`rough-node default`,
+    // `data-look="handDrawn"`); the classic look uses the flat `node default`
+    // group. mermaid emits a trailing space after `default` for rough nodes.
+    if roughness > 0.0 {
+        let _ = write!(
+            s,
+            r#"<g class="rough-node default {} " id="{}-flowchart-{}-0" data-look="handDrawn" transform="translate({}, {})">"#,
+            node.classes.join(" "),
+            ID,
+            escape(&node.id),
+            round(node.cx),
+            round(node.cy),
+        );
+    } else {
+        let _ = write!(
+            s,
+            r#"<g class="node default{}" id="{}-flowchart-{}-0" data-look="classic" transform="translate({}, {})">"#,
+            class_suffix(&node.classes),
+            ID,
+            escape(&node.id),
+            round(node.cx),
+            round(node.cy),
+        );
+    }
     render_shape(s, node, roughness);
     // g.label is offset up by half the label block height so the (possibly
     // multi-line) text is vertically centred, matching mermaid.
@@ -365,6 +380,13 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     match node.shape {
+        NodeShape::Rectangle | NodeShape::DataStore if is_hand_drawn(roughness) => {
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().rectangle(-hw, -hh, node.width, node.height, &o);
+            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            emit_rough_drawable(s, &drawable, false, "");
+            s.push_str("</g>");
+        }
         NodeShape::Rectangle | NodeShape::DataStore => {
             // DataStore (`@{shape: datastore}`) is the same rect but with its
             // vertical sides dashed away: a `stroke-dasharray` of the rect's own
@@ -383,6 +405,23 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(node.height),
             );
         }
+        NodeShape::RoundedRectangle | NodeShape::Stadium if is_hand_drawn(roughness) => {
+            let is_stadium = matches!(node.shape, NodeShape::Stadium);
+            let r = if is_stadium { hh } else { 5.0 };
+            let d = rounded_rect_path(-hw, -hh, node.width, node.height, r);
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().path(&d, &o);
+            // The stadium (pill) carries mermaid's `outer-path` class and no
+            // `style` attr; the rounded rectangle carries `style` and no
+            // `outer-path` — matching the oracle DOM.
+            if is_stadium {
+                s.push_str(r#"<g class="basic label-container outer-path">"#);
+            } else {
+                let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            }
+            emit_rough_drawable(s, &drawable, false, "");
+            s.push_str("</g>");
+        }
         NodeShape::RoundedRectangle | NodeShape::Stadium => {
             let rx = if matches!(node.shape, NodeShape::Stadium) { hh } else { 5.0 };
             let _ = write!(
@@ -396,6 +435,13 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(node.height),
             );
         }
+        NodeShape::Circle if is_hand_drawn(roughness) => {
+            let o = rough_options(roughness);
+            let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
+            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            emit_rough_drawable(s, &drawable, false, "");
+            s.push_str("</g>");
+        }
         NodeShape::Circle => {
             // Centred at the node group's origin (the group is already
             // translated to the node centre), matching mermaid's `cx=0 cy=0`.
@@ -404,6 +450,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 r#"<circle class="basic label-container"{st} cx="0" cy="0" r="{}"/>"#,
                 round(node.width / 2.0),
             );
+        }
+        NodeShape::Rhombus if is_hand_drawn(roughness) => {
+            let side = node.width;
+            let pts = [
+                [side / 2.0, 0.0],
+                [side, -side / 2.0],
+                [side / 2.0, -side],
+                [0.0, -side / 2.0],
+            ];
+            emit_hd_polygon(s, &pts, -side / 2.0 + 0.5, side / 2.0, &node.shape_style, roughness);
         }
         NodeShape::Rhombus => {
             // mermaid `question`: a square diamond of side `side`, points laid
@@ -422,6 +478,19 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(side / 2.0),
             );
         }
+        NodeShape::Hexagon if is_hand_drawn(roughness) => {
+            let (w, h) = (node.width, node.height);
+            let m = h / 4.0;
+            let pts = [
+                [m, 0.0],
+                [w - m, 0.0],
+                [w, -h / 2.0],
+                [w - m, -h],
+                [m, -h],
+                [0.0, -h / 2.0],
+            ];
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+        }
         NodeShape::Hexagon => {
             let (w, h) = (node.width, node.height);
             let m = h / 4.0;
@@ -432,6 +501,23 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 h / 2.0,
                 &st,
             );
+        }
+        NodeShape::Subroutine if is_hand_drawn(roughness) => {
+            // Outer rectangle plus two inner vertical bars (inset 8px), each a
+            // separate rough drawable — matching mermaid's handDrawn subroutine
+            // (1 hachure fill + 3 strokes).
+            let (w, h) = (node.width, node.height);
+            let inset = hw - 8.0;
+            let gen = roughr::Generator::new();
+            let o = rough_options(roughness);
+            let rect = gen.rectangle(-hw, -hh, w, h, &o);
+            let left = gen.line(-inset, -hh, -inset, hh, &o);
+            let right = gen.line(inset, -hh, inset, hh, &o);
+            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            emit_rough_drawable(s, &rect, false, "");
+            emit_drawable(s, &left, false, "", None, "#9370DB", "1.3");
+            emit_drawable(s, &right, false, "", None, "#9370DB", "1.3");
+            s.push_str("</g>");
         }
         NodeShape::Subroutine => {
             let (w, h) = (node.width - 16.0, node.height); // inner width
@@ -448,21 +534,82 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         }
         // Slanted shapes: recover the inner width (dagre width minus the h/2
         // overflow on each side), and lay points out around it.
+        NodeShape::Parallelogram if is_hand_drawn(roughness) => {
+            let (w, h) = (node.width - node.height, node.height);
+            let pts = [[-h / 2.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [0.0, -h]];
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+        }
         NodeShape::Parallelogram => {
             let (w, h) = (node.width - node.height, node.height);
             emit_polygon(s, &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
+        }
+        NodeShape::LeanLeft if is_hand_drawn(roughness) => {
+            let (w, h) = (node.width - node.height, node.height);
+            let pts = [[0.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [-h / 2.0, -h]];
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
         }
         NodeShape::LeanLeft => {
             let (w, h) = (node.width - node.height, node.height);
             emit_polygon(s, &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
         }
+        NodeShape::Trapezoid if is_hand_drawn(roughness) => {
+            let (w, h) = (node.width - node.height, node.height);
+            let pts = [[-h / 2.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [0.0, -h]];
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+        }
         NodeShape::Trapezoid => {
             let (w, h) = (node.width - node.height, node.height);
             emit_polygon(s, &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
         }
+        NodeShape::InvTrapezoid if is_hand_drawn(roughness) => {
+            let (w, h) = (node.width - node.height, node.height);
+            let pts = [[0.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [-h / 2.0, -h]];
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+        }
         NodeShape::InvTrapezoid => {
             let (w, h) = (node.width - node.height, node.height);
             emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
+        }
+        NodeShape::Cylinder if is_hand_drawn(roughness) => {
+            let w = node.width;
+            let ry = crate::layout::cylinder_ry(w);
+            let rx = w / 2.0;
+            let body = node.height - 2.0 * ry;
+            // Same local cylinder outline the classic look uses, rendered rough
+            // and positioned via the group transform.
+            let d = format!(
+                "M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0 l0,{body} a{rx},{ry} 0,0,0 {w},0 l0,{nbody}",
+                ry = round(ry),
+                rx = round(rx),
+                w = round(w),
+                nw = round(-w),
+                body = round(body),
+                nbody = round(-body),
+            );
+            // The top ellipse rim is drawn as a separate stroke, matching
+            // mermaid's handDrawn cylinder (1 hachure fill + 2 outline strokes).
+            let top = format!(
+                "M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0",
+                ry = round(ry),
+                rx = round(rx),
+                w = round(w),
+                nw = round(-w),
+            );
+            let gen = roughr::Generator::new();
+            let o = rough_options(roughness);
+            let body = gen.path(&d, &o);
+            let rim = gen.path(&top, &o);
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container"{} label-offset-y="{}" transform="translate({}, {})">"#,
+                hd_style(&node.shape_style),
+                round(ry),
+                round(-w / 2.0),
+                round(-node.height / 2.0),
+            );
+            emit_rough_drawable(s, &body, false, "");
+            emit_drawable(s, &rim, false, "", None, "#9370DB", "1.3");
+            s.push_str("</g>");
         }
         NodeShape::Cylinder => {
             // mermaid's `[(db)]` is a 3D cylinder path: full top ellipse (two
@@ -1256,11 +1403,60 @@ fn rough_options(roughness: f64) -> roughr::Options {
     let mut o = gen.default_options();
     o.roughness = roughness;
     o.fill = Some("#ECECFF".to_string());
-    o.fill_style = "solid".to_string();
+    // Classic (roughness 0) fills solid — the fill path is then the exact shape
+    // vertices, matching mermaid. The hand-drawn look (roughness > 0) fills with
+    // rough.js's hachure (parallel sketch lines), matching mermaid's handDrawn.
+    o.fill_style = if roughness > 0.0 { "hachure" } else { "solid" }.to_string();
     o.stroke = "#9370DB".to_string();
     o.bowing = 1.0;
     o.seed = 1;
     o
+}
+
+/// `true` when the given roughness selects the hand-drawn look (roughness > 0).
+fn is_hand_drawn(roughness: f64) -> bool {
+    roughness > 0.0
+}
+
+/// The ` style="…"` attribute that mermaid's hand-drawn shape groups always
+/// carry (empty when the node is unstyled: `style=""`).
+fn hd_style(shape_style: &str) -> String {
+    format!(r#" style="{}""#, escape(shape_style))
+}
+
+/// Emit a hand-drawn polygon shape (rhombus / hexagon / slanted shapes): a
+/// `<g transform=… style=…>` wrapping the rough hachure-fill + outline paths,
+/// built from the same vertex array the classic look uses.
+fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_style: &str, roughness: f64) {
+    let o = rough_options(roughness);
+    let drawable = roughr::Generator::new().polygon(points, &o);
+    let _ = write!(
+        s,
+        r#"<g transform="translate({}, {})"{}>"#,
+        round(tx),
+        round(ty),
+        hd_style(shape_style),
+    );
+    emit_rough_drawable(s, &drawable, false, "");
+    s.push_str("</g>");
+}
+
+/// An SVG rounded-rectangle path `d`, used by the hand-drawn rounded rectangle
+/// and stadium (which is a rounded rect with `r = height/2`).
+fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, r: f64) -> String {
+    format!(
+        "M{x},{yr} A{r},{r} 0 0 1 {xr},{y} L{xwr},{y} A{r},{r} 0 0 1 {xw},{yr} \
+         L{xw},{yhr} A{r},{r} 0 0 1 {xwr},{yh} L{xr},{yh} A{r},{r} 0 0 1 {x},{yhr} Z",
+        x = round(x),
+        y = round(y),
+        r = round(r),
+        xr = round(x + r),
+        xwr = round(x + w - r),
+        xw = round(x + w),
+        yr = round(y + r),
+        yhr = round(y + h - r),
+        yh = round(y + h),
+    )
 }
 
 /// Emit a `roughr` [`Drawable`] as mermaid's rough shape DOM: a fill `<path>`
@@ -1292,11 +1488,21 @@ fn emit_drawable(
 ) {
     if let Some(fc) = fill {
         let fill_d = drawable.fill_path(None);
-        let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
-        let _ = write!(
-            s,
-            r##"<path d="{fill_d}" stroke="none" stroke-width="0" fill="{fc}"{rule}{st}/>"##,
-        );
+        if drawable.options.fill_style == "hachure" {
+            // Hand-drawn look: the fill is a hachure sketch (parallel lines),
+            // so it renders as a *stroke* in the fill colour with no area fill.
+            // fill-rule is irrelevant (fill="none") and mermaid omits it.
+            let _ = write!(
+                s,
+                r##"<path d="{fill_d}" stroke="{fc}" stroke-width="4" fill="none" stroke-dasharray="0 0"{st}/>"##,
+            );
+        } else {
+            let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+            let _ = write!(
+                s,
+                r##"<path d="{fill_d}" stroke="none" stroke-width="0" fill="{fc}"{rule}{st}/>"##,
+            );
+        }
     }
     let stroke_d = drawable.stroke_path(None);
     let _ = write!(

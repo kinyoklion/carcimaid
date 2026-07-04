@@ -52,7 +52,7 @@ impl Look {
 pub struct Flowchart {
     pub direction: Direction,
     /// Visual look (`look:` frontmatter). Selects rough.js roughness; defaults
-    /// to [`Look::Classic`]. (Frontmatter parsing is a later task.)
+    /// to [`Look::Classic`]. Parsed from the top-level `config.look` key.
     pub look: Look,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,

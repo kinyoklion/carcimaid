@@ -198,3 +198,8 @@ flowchart_052.mmd	cypress/integration/rendering/flowchart/flowchart.spec.js	52
 flowchart_053.mmd	cypress/integration/rendering/flowchart/flowchart.spec.js	53
 flowchart_054.mmd	cypress/integration/rendering/flowchart/flowchart.spec.js	54
 flowchart_055.mmd	cypress/integration/rendering/flowchart/flowchart.spec.js	55
+flowchart-hdlook_000.mmd	derived: demo-flowchart_003.mmd + look:handDrawn	0
+flowchart-hdlook_001.mmd	derived: demo-flowchart_004.mmd + look:handDrawn	0
+flowchart-hdlook_002.mmd	derived: demo-flowchart_016.mmd + look:handDrawn	0
+flowchart-hdlook_003.mmd	derived: demo-flowchart_026.mmd + look:handDrawn	0
+flowchart-hdlook_004.mmd	derived: demo-flowchart_036.mmd + look:handDrawn	0

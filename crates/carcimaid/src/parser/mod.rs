@@ -4,7 +4,7 @@
 //! line and dispatches to a per-type parser. Only flowcharts are implemented so
 //! far; other types return [`Error::Unsupported`].
 
-use crate::ir::Diagram;
+use crate::ir::{Diagram, Look};
 use crate::{Error, Result};
 
 pub mod flowchart;
@@ -14,6 +14,7 @@ pub fn parse(source: &str) -> Result<Diagram> {
     let title = frontmatter_title(source);
     let node_spacing = frontmatter_flowchart_num(source, "nodeSpacing");
     let rank_spacing = frontmatter_flowchart_num(source, "rankSpacing");
+    let look = frontmatter_look(source).or_else(|| init_look(source));
     let source = strip_frontmatter(source);
     let header = first_keyword(source)
         .ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
@@ -24,6 +25,9 @@ pub fn parse(source: &str) -> Result<Diagram> {
             f.title = title; // visible title from frontmatter
             f.node_spacing = node_spacing;
             f.rank_spacing = rank_spacing;
+            if let Some(lk) = look {
+                f.look = lk;
+            }
             Ok(Diagram::Flowchart(f))
         }
         other => Err(Error::Unsupported(format!("diagram type `{other}`"))),
@@ -58,6 +62,55 @@ fn frontmatter_flowchart_num(source: &str, key: &str) -> Option<f64> {
         }
     }
     None
+}
+
+/// Read the top-level `config.look` from the frontmatter, mapping mermaid's
+/// look names to a [`Look`]. `look:` is a sibling of `flowchart:` inside the
+/// `config:` block; we don't need to know its exact nesting — any `look:` line
+/// in the frontmatter is the diagram look (the `flowchart:` sub-map has no such
+/// key), so a lightweight scan for the first `look:` line suffices.
+fn frontmatter_look(source: &str) -> Option<Look> {
+    let mut lines = source.lines().skip_while(|l| l.trim().is_empty());
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for l in lines {
+        let t = l.trim();
+        if t == "---" {
+            break;
+        }
+        if let Some(v) = t.strip_prefix("look:") {
+            return look_from_str(v.trim().trim_matches(['"', '\'']));
+        }
+    }
+    None
+}
+
+/// Read `look` from a `%%{init: {"look":"handDrawn"}}%%` directive line, if any.
+/// This is a best-effort substring scan rather than a JSON parse.
+fn init_look(source: &str) -> Option<Look> {
+    for l in source.lines() {
+        let t = l.trim();
+        if t.starts_with("%%{") && t.contains("look") {
+            if t.contains("handDrawn") {
+                return Some(Look::HandDrawn);
+            }
+            if t.contains("classic") || t.contains("neo") {
+                return Some(Look::Classic);
+            }
+        }
+    }
+    None
+}
+
+/// Map a mermaid `look` config value to a [`Look`] (`neo` is treated as the
+/// clean/classic rendering, since we don't have a distinct neo look yet).
+fn look_from_str(v: &str) -> Option<Look> {
+    match v {
+        "handDrawn" => Some(Look::HandDrawn),
+        "classic" | "neo" => Some(Look::Classic),
+        _ => None,
+    }
 }
 
 /// Extract the `title:` from a leading YAML frontmatter block, if present.
@@ -114,6 +167,19 @@ mod tests {
         let diagram = parse(src).unwrap();
         let Diagram::Flowchart(f) = diagram;
         assert_eq!(f.nodes.len(), 2);
+    }
+
+    #[test]
+    fn parses_handdrawn_look() {
+        let src = "---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap();
+        assert_eq!(f.look, Look::HandDrawn);
+    }
+
+    #[test]
+    fn defaults_to_classic_look() {
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap();
+        assert_eq!(f.look, Look::Classic);
     }
 
     #[test]
