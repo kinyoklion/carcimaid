@@ -205,6 +205,13 @@ fn style_block() -> String {
         "SVGID .label{font-family:\"trebuchet ms\",verdana,arial,sans-serif;color:#333;}",
         "SVGID .label text{fill:#333;}",
         "SVGID .rough-node .label text,SVGID .node .label text{text-anchor:middle;}",
+        // Shape elements inside a classic node default to the theme node colour.
+        // Icon shapes (fork/sm-circ/f-circ/…) carry a class other than
+        // `.label-container` (or a presentation-attribute fill mermaid overrides),
+        // so this rule is what paints them theme-purple rather than SVG-default
+        // black. Presentation attributes lose to a stylesheet rule; inline
+        // `style=` (classDef colours) still wins, so styled nodes keep their fill.
+        "SVGID .node rect,SVGID .node circle,SVGID .node ellipse,SVGID .node polygon,SVGID .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
         "SVGID .label-container{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
         "SVGID .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}",
         "SVGID .flowchart-link{stroke:#333;fill:none;}",
@@ -339,6 +346,15 @@ fn render_node(s: &mut String, node: &PlacedNode, roughness: f64) {
         );
     }
     render_shape(s, node, roughness);
+    // Icon shapes (fork/join, the state start/stop/junction circles, the crossed
+    // circle, hourglass, lightning bolt) are fixed-size glyphs that mermaid draws
+    // with *no* label: their handlers set `node.label = ""` and never call
+    // `labelHelper`, so the node group has no `g.label` child at all. Emit the
+    // shape and stop, matching the oracle DOM.
+    if is_labelless(node.shape) {
+        s.push_str("</g>");
+        return;
+    }
     // g.label is offset up by half the label block height so the (possibly
     // multi-line) text is vertically centred, matching mermaid.
     let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0).len().max(1);
@@ -379,12 +395,15 @@ fn class_suffix(classes: &[String]) -> String {
 fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
+    // Per-node hand-drawn colours (classDef/`style` fill/stroke, or theme
+    // defaults). Baked into the rough paths for the hand-drawn look.
+    let (hd_fill, hd_stroke, hd_sw) = hand_drawn_colors(&node.shape_style);
     match node.shape {
         NodeShape::Rectangle | NodeShape::DataStore if is_hand_drawn(roughness) => {
             let o = rough_options(roughness);
             let drawable = roughr::Generator::new().rectangle(-hw, -hh, node.width, node.height, &o);
             let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
-            emit_rough_drawable(s, &drawable, false, "");
+            emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::Rectangle | NodeShape::DataStore => {
@@ -419,7 +438,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             } else {
                 let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
             }
-            emit_rough_drawable(s, &drawable, false, "");
+            emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::RoundedRectangle | NodeShape::Stadium => {
@@ -439,7 +458,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let o = rough_options(roughness);
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
             let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
-            emit_rough_drawable(s, &drawable, false, "");
+            emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::Circle => {
@@ -514,9 +533,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let left = gen.line(-inset, -hh, -inset, hh, &o);
             let right = gen.line(inset, -hh, inset, hh, &o);
             let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
-            emit_rough_drawable(s, &rect, false, "");
-            emit_drawable(s, &left, false, "", None, "#9370DB", "1.3");
-            emit_drawable(s, &right, false, "", None, "#9370DB", "1.3");
+            emit_hd_drawable(s, &rect, false, &hd_fill, &hd_stroke, &hd_sw);
+            emit_drawable(s, &left, false, "", None, &hd_stroke, &hd_sw);
+            emit_drawable(s, &right, false, "", None, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::Subroutine => {
@@ -607,8 +626,8 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-w / 2.0),
                 round(-node.height / 2.0),
             );
-            emit_rough_drawable(s, &body, false, "");
-            emit_drawable(s, &rim, false, "", None, "#9370DB", "1.3");
+            emit_hd_drawable(s, &body, false, &hd_fill, &hd_stroke, &hd_sw);
+            emit_drawable(s, &rim, false, "", None, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::Cylinder => {
@@ -1427,6 +1446,57 @@ fn is_hand_drawn(roughness: f64) -> bool {
     roughness > 0.0
 }
 
+/// Look up a CSS property value in a `;`-separated decl string like
+/// `"fill:#888 !important;stroke:#001f3f !important"`, stripping any
+/// `!important`/whitespace. Returns `None` when the property is absent.
+fn css_value(style: &str, prop: &str) -> Option<String> {
+    for decl in style.split(';') {
+        let Some((k, v)) = decl.split_once(':') else { continue };
+        if k.trim() == prop {
+            return Some(v.replace("!important", "").trim().to_string());
+        }
+    }
+    None
+}
+
+/// The resolved (fill, stroke, stroke-width) a hand-drawn shape should paint,
+/// taken from the node's inline shape style (classDef / `style` colours) and
+/// falling back to the theme node colours. mermaid bakes these into the rough
+/// paths (the fill colour draws the hachure lines, the stroke the outline)
+/// rather than onto the group's `style`, so per-node colours need threading
+/// into the drawable emission here.
+fn hand_drawn_colors(shape_style: &str) -> (String, String, String) {
+    let fill = css_value(shape_style, "fill").unwrap_or_else(|| "#ECECFF".to_string());
+    let stroke = css_value(shape_style, "stroke").unwrap_or_else(|| "#9370DB".to_string());
+    let sw = css_value(shape_style, "stroke-width")
+        .map(|w| w.trim_end_matches("px").trim().to_string())
+        .unwrap_or_else(|| "1.3".to_string());
+    (fill, stroke, sw)
+}
+
+/// Emit a rough drawable for a hand-drawn shape with explicit resolved colours
+/// (the hachure fill colour, the outline stroke, and its width).
+fn emit_hd_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, fill: &str, stroke: &str, sw: &str) {
+    emit_drawable(s, drawable, evenodd, "", Some(fill), stroke, sw);
+}
+
+/// `true` for the fixed-size icon shapes mermaid renders with no label text.
+/// Their handlers (`forkJoin`, `stateStart`, `filledCircle`, `stateEnd`,
+/// `crossedCircle`, `hourglass`, `lightningBolt`) blank the label and skip
+/// `labelHelper`, so the node group emits no `g.label` child.
+fn is_labelless(shape: NodeShape) -> bool {
+    matches!(
+        shape,
+        NodeShape::Fork
+            | NodeShape::SmallCircle
+            | NodeShape::FilledCircle
+            | NodeShape::FramedCircle
+            | NodeShape::CrossedCircle
+            | NodeShape::Hourglass
+            | NodeShape::LightningBolt
+    )
+}
+
 /// The ` style="…"` attribute that mermaid's hand-drawn shape groups always
 /// carry (empty when the node is unstyled: `style=""`).
 fn hd_style(shape_style: &str) -> String {
@@ -1439,6 +1509,7 @@ fn hd_style(shape_style: &str) -> String {
 fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_style: &str, roughness: f64) {
     let o = rough_options(roughness);
     let drawable = roughr::Generator::new().polygon(points, &o);
+    let (fill, stroke, sw) = hand_drawn_colors(shape_style);
     let _ = write!(
         s,
         r#"<g transform="translate({}, {})"{}>"#,
@@ -1446,7 +1517,7 @@ fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_
         round(ty),
         hd_style(shape_style),
     );
-    emit_rough_drawable(s, &drawable, false, "");
+    emit_hd_drawable(s, &drawable, false, &fill, &stroke, &sw);
     s.push_str("</g>");
 }
 
@@ -1812,6 +1883,49 @@ fn clip_to_shape(node: &PlacedNode, toward: (f64, f64)) -> Option<(f64, f64)> {
     // at the bounding-box corner, outside the shape. Clip to the rounded outline.
     if let NodeShape::Stadium = node.shape {
         return Some(clip_rounded_rect(c, node.width, node.height, node.height / 2.0, toward));
+    }
+    // Vertical cylinders: dagre routes to the (full-height) bounding rect, but the
+    // top/bottom are elliptical caps, so an edge aimed near a cap ends above/below
+    // the drawn outline. Port mermaid's cylinder `intersect`: rect intersection,
+    // then push the endpoint onto the cap ellipse in the cap region.
+    if let NodeShape::Cylinder | NodeShape::LinedCylinder = node.shape {
+        let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+        let ry = crate::layout::cylinder_ry(node.width);
+        let (dx, dy) = (toward.0 - c.0, toward.1 - c.1);
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+        // intersect.rect: crossing of the ray with the node's bounding rectangle.
+        let (mut sw, mut sh) = (hw, hh);
+        let (sx, sy);
+        if dy.abs() * hw > dx.abs() * hh {
+            if dy < 0.0 {
+                sh = -sh;
+            }
+            sx = if dy == 0.0 { 0.0 } else { sh * dx / dy };
+            sy = sh;
+        } else {
+            if dx < 0.0 {
+                sw = -sw;
+            }
+            sx = sw;
+            sy = if dx == 0.0 { 0.0 } else { sw * dy / dx };
+        }
+        let mut y = sy;
+        // In the cap region (hit the flat top/bottom, or the side beyond the body)
+        // drop the point onto the ellipse: y += ry - sqrt(ry²(1 - x²/rx²)).
+        if hw != 0.0 && (sx.abs() < hw || (sx.abs() == hw && sy.abs() > hh - ry)) {
+            let mut yv = ry * ry * (1.0 - sx * sx / (hw * hw));
+            if yv > 0.0 {
+                yv = yv.sqrt();
+            }
+            yv = ry - yv;
+            if dy > 0.0 {
+                yv = -yv;
+            }
+            y += yv;
+        }
+        return Some((c.0 + sx, c.1 + y));
     }
     let poly = shape_boundary(node)?;
     // Find where segment centre→toward crosses a polygon edge.
