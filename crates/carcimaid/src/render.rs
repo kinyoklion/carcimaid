@@ -1411,6 +1411,14 @@ fn rough_options(roughness: f64) -> roughr::Options {
     o.stroke = "#9370DB".to_string();
     o.bowing = 1.0;
     o.seed = 1;
+    // Match mermaid's `userNodeOverrides` so the hachure (hand-drawn fill) has
+    // the same line spacing/weight as the oracle. Without these, roughr's
+    // default hachureGap (~4) equals the 4px line width, so the sketch lines
+    // touch and merge into a solid fill instead of reading as hand-drawn.
+    o.fill_weight = 4.0;
+    o.hachure_gap = 5.2;
+    o.hachure_angle = -41.0;
+    o.stroke_width = 1.3;
     o
 }
 
