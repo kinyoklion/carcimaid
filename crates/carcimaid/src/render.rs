@@ -204,7 +204,7 @@ fn style_block() -> String {
         "SVGID{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#333;}",
         "SVGID .label{font-family:\"trebuchet ms\",verdana,arial,sans-serif;color:#333;}",
         "SVGID .label text{fill:#333;}",
-        "SVGID .node .label text{text-anchor:middle;}",
+        "SVGID .rough-node .label text,SVGID .node .label text{text-anchor:middle;}",
         "SVGID .label-container{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
         "SVGID .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}",
         "SVGID .flowchart-link{stroke:#333;fill:none;}",
