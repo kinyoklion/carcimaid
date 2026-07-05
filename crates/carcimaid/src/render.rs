@@ -299,7 +299,7 @@ fn render_scope(
             cluster.home == owner
         };
         if here {
-            render_cluster(s, cluster);
+            render_cluster(s, cluster, roughness, pal);
         }
     }
     s.push_str("</g>");
@@ -330,32 +330,94 @@ fn render_scope(
     s.push_str("</g>"); // close g.root
 }
 
-fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
+fn render_cluster(s: &mut String, cluster: &PlacedCluster, roughness: f64, pal: &Palette) {
     let x = cluster.cx - cluster.width / 2.0;
     let y = cluster.cy - cluster.height / 2.0;
-    let _ = write!(
-        s,
-        r#"<g class="cluster{}" id="{}-{}" data-look="classic"><rect{} x="{}" y="{}" width="{}" height="{}"/>"#,
-        class_suffix(&cluster.classes),
-        ID,
-        escape(&cluster.id),
-        style_attr(&cluster.shape_style),
-        round(x),
-        round(y),
-        round(cluster.width),
-        round(cluster.height),
-    );
+    let label_cls;
+    if is_hand_drawn(roughness) {
+        // Hand-drawn cluster: a rough rectangle (hachure fill + sketch outline)
+        // through roughr, mirroring the node pattern. Theme cluster colours are
+        // baked as presentation attributes; the subgraph's own `style` (fill /
+        // stroke / stroke-width) rides along as an `!important` inline override,
+        // exactly as mermaid emits it. The group carries no transform — the
+        // rough paths are already in absolute (diagram) coordinates.
+        let _ = write!(
+            s,
+            r#"<g class="cluster{} " id="{}-{}" data-look="handDrawn"><g>"#,
+            class_suffix(&cluster.classes),
+            ID,
+            escape(&cluster.id),
+        );
+        let o = rough_options(roughness, pal);
+        let drawable = roughr::Generator::new().rectangle(x, y, cluster.width, cluster.height, &o);
+        // Fill hachure: theme clusterBkg, with the subgraph `fill` (if any)
+        // overriding via `stroke:` (a hachure fill paints as a stroke). mermaid
+        // draws these lines at a fixed weight of 3.
+        let fill_style = match css_value(&cluster.shape_style, "fill") {
+            Some(f) => format!(r#"stroke:{} !important"#, f),
+            None => String::new(),
+        };
+        let _ = write!(
+            s,
+            r#"<path d="{}" stroke="{}" stroke-width="3" fill="none" stroke-dasharray="0 0" style="{}"/>"#,
+            drawable.fill_path(None),
+            pal.cluster_bkg,
+            escape(&fill_style),
+        );
+        // Outline: theme clusterBorder, width from the subgraph `stroke-width`
+        // (default 1.3); the subgraph `style` minus its `fill` rides along.
+        let sw = css_value(&cluster.shape_style, "stroke-width")
+            .map(|w| w.trim_end_matches("px").trim().to_string())
+            .unwrap_or_else(|| "1.3".to_string());
+        let _ = write!(
+            s,
+            r#"<path d="{}" stroke="{}" stroke-width="{}" fill="none" stroke-dasharray="0 0" style="{}"/>"#,
+            drawable.stroke_path(None),
+            pal.cluster_border,
+            sw,
+            escape(&style_without_fill(&cluster.shape_style)),
+        );
+        s.push_str("</g>");
+        label_cls = "cluster-label ";
+    } else {
+        let _ = write!(
+            s,
+            r#"<g class="cluster{}" id="{}-{}" data-look="classic"><rect{} x="{}" y="{}" width="{}" height="{}"/>"#,
+            class_suffix(&cluster.classes),
+            ID,
+            escape(&cluster.id),
+            style_attr(&cluster.shape_style),
+            round(x),
+            round(y),
+            round(cluster.width),
+            round(cluster.height),
+        );
+        label_cls = "cluster-label";
+    }
     // The label sits centred at the top of the cluster box.
     let label_x = cluster.cx - crate::text::measure_width(&cluster.title, 16.0) / 2.0;
     let _ = write!(
         s,
-        r#"<g class="cluster-label" transform="translate({}, {})"><g>"#,
+        r#"<g class="{}" transform="translate({}, {})"><g>"#,
+        label_cls,
         round(label_x),
         round(y),
     );
     s.push_str(r#"<rect class="background" style="stroke: none"/>"#);
     render_text(s, Some(&cluster.title), false, "");
     s.push_str("</g></g></g>");
+}
+
+/// A `;`-separated style declaration string with any `fill:` declaration
+/// dropped (used for a hand-drawn cluster's outline, whose fill rides on the
+/// separate hachure path instead).
+fn style_without_fill(style: &str) -> String {
+    style
+        .split(';')
+        .filter(|decl| !decl.trim().is_empty())
+        .filter(|decl| decl.split_once(':').map(|(k, _)| k.trim() != "fill").unwrap_or(true))
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn render_node(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette) {
@@ -631,31 +693,29 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let w = node.width;
             let ry = crate::layout::cylinder_ry(w);
             let rx = w / 2.0;
-            let body = node.height - 2.0 * ry;
-            // Same local cylinder outline the classic look uses, rendered rough
-            // and positioned via the group transform.
-            let d = format!(
-                "M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0 l0,{body} a{rx},{ry} 0,0,0 {w},0 l0,{nbody}",
-                ry = round(ry),
+            let body_h = node.height - 2.0 * ry;
+            // Feed roughr the *silhouette* (a single closed loop: top back arc,
+            // sides, bottom front arc) so the hachure fills the whole body —
+            // including up under the top ellipse — as continuous diagonals.
+            // Passing the full outline (with the doubled top ellipse) instead
+            // makes roughr treat the cap as its own tiny sub-loop and cram it
+            // with a dense black band of short hachure segments.
+            let d = cylinder_silhouette(ry, rx, w, body_h);
+            // The top ellipse's front (visible opening) arc is drawn as a
+            // separate stroke in its own `<g>`, in node-centred coords, matching
+            // mermaid's handDrawn cylinder.
+            let rim_d = format!(
+                "M{sx},{sy} a{rx},{ry} 0,0,0 {w},0",
+                sx = round(-w / 2.0),
+                sy = round(-node.height / 2.0 + ry),
                 rx = round(rx),
-                w = round(w),
-                nw = round(-w),
-                body = round(body),
-                nbody = round(-body),
-            );
-            // The top ellipse rim is drawn as a separate stroke, matching
-            // mermaid's handDrawn cylinder (1 hachure fill + 2 outline strokes).
-            let top = format!(
-                "M0,{ry} a{rx},{ry} 0,0,0 {w},0 a{rx},{ry} 0,0,0 {nw},0",
                 ry = round(ry),
-                rx = round(rx),
                 w = round(w),
-                nw = round(-w),
             );
             let gen = roughr::Generator::new();
             let o = rough_options(roughness, pal);
             let body = gen.path(&d, &o);
-            let rim = gen.path(&top, &o);
+            let rim = gen.path(&rim_d, &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container"{} label-offset-y="{}" transform="translate({}, {})">"#,
@@ -665,6 +725,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 round(-node.height / 2.0),
             );
             emit_hd_drawable(s, &body, false, &hd_fill, &hd_stroke, &hd_sw);
+            s.push_str("</g><g>");
             emit_drawable(s, &rim, false, "", None, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
@@ -826,8 +887,20 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let outer_d = roughr::Generator::new().path(&path_from_points(&outer), &o);
             let inner_d = roughr::Generator::new().path(&path_from_points(&inner), &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
-            emit_merged(s, &outer_d, &st, pal);
-            emit_merged(s, &inner_d, &st, pal);
+            if is_hand_drawn(roughness) {
+                // Hand-drawn look: each stacked rect is a separate rough
+                // drawable in its own `<g>`, emitting a hachure fill path + a
+                // sketch outline path — like every other hand-drawn shape, not
+                // the classic `mergePaths` single-path-per-rect form.
+                s.push_str("<g>");
+                emit_hd_drawable(s, &outer_d, false, &hd_fill, &hd_stroke, &hd_sw);
+                s.push_str("</g><g>");
+                emit_hd_drawable(s, &inner_d, false, &hd_fill, &hd_stroke, &hd_sw);
+                s.push_str("</g>");
+            } else {
+                emit_merged(s, &outer_d, &st, pal);
+                emit_merged(s, &inner_d, &st, pal);
+            }
             s.push_str("</g>");
         }
         // Notched rectangle (card): an exact `<polygon>` (insertPolygonShape), a
@@ -922,6 +995,19 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
         }
         // Filled junction circle (filledCircle, r=7, no label): mermaid
         // `rc.circle` (solid), both paths styled `fill: nodeBorder !important`.
+        NodeShape::FilledCircle if is_hand_drawn(roughness) => {
+            // The hand-drawn filled disc is a SOLID rough circle (node fill +
+            // outline), not a hachure sketch — mermaid does *not* apply the
+            // classic look's `fill: nodeBorder !important` override here. Force
+            // the solid fill style so a tiny disc reads as a filled dot, not a
+            // black hachure smudge.
+            let mut o = rough_options(roughness, pal);
+            o.fill_style = "solid".to_string();
+            let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
+            s.push_str("<g>");
+            emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
+            s.push_str("</g>");
+        }
         NodeShape::FilledCircle => {
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
@@ -942,6 +1028,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let mut inner_o = o.clone();
             inner_o.fill = Some(pal.node_border.to_string());
             inner_o.stroke = pal.node_border.to_string();
+            // The inner disc is a SOLID fill (node border), not a hachure
+            // sketch, in both the classic and hand-drawn looks.
+            inner_o.fill_style = "solid".to_string();
             let inner = gen.circle(0.0, 0.0, node.width * 5.0 / 14.0, &inner_o);
             s.push_str(r#"<g class="outer-path">"#);
             emit_drawable(s, &outer, false, &st, Some(pal.node_bkg), pal.line_color, "2");
@@ -1246,6 +1335,41 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             );
         }
         // Lined (disk) cylinder: a vertical cylinder with an inner top-cap line.
+        NodeShape::LinedCylinder if is_hand_drawn(roughness) => {
+            let w = node.width;
+            let ry = crate::layout::cylinder_ry(w);
+            let rx = w / 2.0;
+            let body_h = node.height - 2.0 * ry;
+            // Cylinder silhouette (single closed loop) so the hachure fill is a
+            // continuous set of diagonals rather than a doubled top ellipse.
+            let d = cylinder_silhouette(ry, rx, w, body_h);
+            // The "lined" horizontal rim sits `2*ry` below the top, drawn (like
+            // mermaid) in a separate `<g class="line">` in node-centred coords.
+            let line_d = format!(
+                "M{sx},{sy} a{rx},{ry} 0,0,0 {w},0",
+                sx = round(-w / 2.0),
+                sy = round(-node.height / 2.0 + 2.0 * ry),
+                rx = round(rx),
+                ry = round(ry),
+                w = round(w),
+            );
+            let gen = roughr::Generator::new();
+            let o = rough_options(roughness, pal);
+            let body = gen.path(&d, &o);
+            let line = gen.path(&line_d, &o);
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container"{} label-offset-y="{}" transform="translate({}, {})">"#,
+                hd_style(&node.shape_style),
+                round(ry),
+                round(-w / 2.0),
+                round(-node.height / 2.0),
+            );
+            emit_hd_drawable(s, &body, false, &hd_fill, &hd_stroke, &hd_sw);
+            s.push_str(r#"</g><g class="line">"#);
+            emit_hd_drawable(s, &line, false, &hd_fill, &hd_stroke, &hd_sw);
+            s.push_str("</g>");
+        }
         NodeShape::LinedCylinder => {
             let w = node.width;
             let ry = crate::layout::cylinder_ry(w);
@@ -1558,6 +1682,25 @@ fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_
     );
     emit_hd_drawable(s, &drawable, false, &fill, &stroke, &sw);
     s.push_str("</g>");
+}
+
+/// The cylinder *silhouette* path `d` in local (top-left origin) coordinates: a
+/// single closed loop tracing the top back arc, the right side, the bottom
+/// front arc, and the left side. Unlike the classic full outline (which draws
+/// the complete top ellipse as two arcs), this has no self-intersecting cap
+/// sub-loop, so roughr's hachure fills it as continuous diagonals across the
+/// whole body — matching mermaid's handDrawn cylinder. `ry`/`rx` are the cap
+/// radii, `w` the width, `body_h` the straight body height.
+fn cylinder_silhouette(ry: f64, rx: f64, w: f64, body_h: f64) -> String {
+    format!(
+        "M0,{ry} a{rx},{ry} 0,0,1 {w},0 l0,{body} a{rx},{ry} 0,0,1 {nw},0 l0,{nbody}",
+        ry = round(ry),
+        rx = round(rx),
+        w = round(w),
+        nw = round(-w),
+        body = round(body_h),
+        nbody = round(-body_h),
+    )
 }
 
 /// An SVG rounded-rectangle path `d`, used by the hand-drawn rounded rectangle
