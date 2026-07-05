@@ -25,7 +25,7 @@
 
 mod markers;
 
-use crate::ir::{ArrowType, NodeShape};
+use crate::ir::{ArrowType, NodeShape, Palette};
 use crate::layout::{LaidOut, LaidOutFlowchart, PlacedCluster, PlacedEdge, PlacedNode};
 use std::fmt::Write;
 
@@ -112,7 +112,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     //    centres node labels (`text-anchor:middle`) and gives edge labels a
     //    background; without it our labels are left-anchored (off-centre). The
     //    comparator ignores <style> text, so this adds no structural diff.
-    s.push_str(&style_block());
+    //    Colours come from the theme palette (default palette = the historical
+    //    hardcoded values, so default-theme output is byte-unchanged).
+    let palette = chart.theme.palette();
+    let pal = &palette;
+    s.push_str(&style_block(pal));
 
     // 2. wrapper <g> with markers + the (possibly nested) g.root tree.
     //    Extracted subgraphs render inside a translated g.root, so shift each
@@ -152,7 +156,7 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
-    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0), chart.look.roughness());
+    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0), chart.look.roughness(), pal);
     // Colour-matched point-arrow markers for stroke-coloured edges (unique
     // (side, colour), first-seen order) — mermaid appends these after g.root.
     let mut seen: Vec<(&str, &str)> = Vec::new();
@@ -181,6 +185,25 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         id = ID,
     );
 
+    // 3b. Non-default themes append a `<linearGradient>` (the neo-look gradient
+    //     stroke) after the defs and before the title — mermaid emits it for
+    //     every theme except default, so matching it keeps themed diagrams from
+    //     showing a spurious "missing element" diff.
+    if let Some((stop0, stop1)) = pal.gradient_stops {
+        let _ = write!(
+            s,
+            concat!(
+                r#"<linearGradient id="{id}-gradient" gradientUnits="objectBoundingBox" "#,
+                r#"x1="0%" y1="0%" x2="100%" y2="0%">"#,
+                r#"<stop offset="0%" stop-color="{s0}" stop-opacity="1"/>"#,
+                r#"<stop offset="100%" stop-color="{s1}" stop-opacity="1"/></linearGradient>"#,
+            ),
+            id = ID,
+            s0 = stop0,
+            s1 = stop1,
+        );
+    }
+
     // 4. Visible title (last svg child), horizontally centred above the diagram.
     if let Some(t) = &chart.title {
         let _ = write!(
@@ -199,28 +222,42 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 /// emit. Scoped to the diagram id so it doesn't leak. Mirrors mermaid's own
 /// approach of embedding node/edge/label styling (which is why label centering
 /// lives here, not in a `text-anchor` attribute).
-fn style_block() -> String {
-    const CSS: &str = concat!(
-        "SVGID{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#333;}",
-        "SVGID .label{font-family:\"trebuchet ms\",verdana,arial,sans-serif;color:#333;}",
-        "SVGID .label text{fill:#333;}",
-        "SVGID .rough-node .label text,SVGID .node .label text{text-anchor:middle;}",
-        // Shape elements inside a classic node default to the theme node colour.
-        // Icon shapes (fork/sm-circ/f-circ/…) carry a class other than
-        // `.label-container` (or a presentation-attribute fill mermaid overrides),
-        // so this rule is what paints them theme-purple rather than SVG-default
-        // black. Presentation attributes lose to a stylesheet rule; inline
-        // `style=` (classDef colours) still wins, so styled nodes keep their fill.
-        "SVGID .node rect,SVGID .node circle,SVGID .node ellipse,SVGID .node polygon,SVGID .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
-        "SVGID .label-container{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}",
-        "SVGID .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}",
-        "SVGID .flowchart-link{stroke:#333;fill:none;}",
-        "SVGID .edgeLabel{background-color:rgba(232,232,232,0.8);}",
-        "SVGID .edgeLabel rect{opacity:0.5;fill:rgba(232,232,232,0.8);}",
-        "SVGID .marker{fill:#333;stroke:#333;}",
-        "SVGID .arrowMarkerPath{fill:#333;stroke:#333;}",
+fn style_block(pal: &Palette) -> String {
+    // Colours are pulled from the theme palette; the default palette reproduces
+    // the historical hardcoded values, so default-theme output is byte-identical.
+    // The comparator ignores <style> text, so per-theme colours here affect
+    // visual fidelity but not the structural diff.
+    let css = format!(
+        concat!(
+            "SVGID{{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:{text};}}",
+            "SVGID .label{{font-family:\"trebuchet ms\",verdana,arial,sans-serif;color:{text};}}",
+            "SVGID .label text{{fill:{text};}}",
+            "SVGID .rough-node .label text,SVGID .node .label text{{text-anchor:middle;}}",
+            // Shape elements inside a classic node default to the theme node colour.
+            // Icon shapes (fork/sm-circ/f-circ/…) carry a class other than
+            // `.label-container` (or a presentation-attribute fill mermaid overrides),
+            // so this rule is what paints them the theme node colour rather than
+            // SVG-default black. Presentation attributes lose to a stylesheet rule;
+            // inline `style=` (classDef colours) still wins, so styled nodes keep
+            // their fill.
+            "SVGID .node rect,SVGID .node circle,SVGID .node ellipse,SVGID .node polygon,SVGID .node path{{fill:{nbkg};stroke:{nborder};stroke-width:1px;}}",
+            "SVGID .label-container{{fill:{nbkg};stroke:{nborder};stroke-width:1px;}}",
+            "SVGID .cluster rect{{fill:{cbkg};stroke:{cborder};stroke-width:1px;}}",
+            "SVGID .flowchart-link{{stroke:{line};fill:none;}}",
+            "SVGID .edgeLabel{{background-color:{elbg};}}",
+            "SVGID .edgeLabel rect{{opacity:0.5;fill:{elbg};}}",
+            "SVGID .marker{{fill:{line};stroke:{line};}}",
+            "SVGID .arrowMarkerPath{{fill:{line};stroke:{line};}}",
+        ),
+        text = pal.text_color,
+        nbkg = pal.node_bkg,
+        nborder = pal.node_border,
+        cbkg = pal.cluster_bkg,
+        cborder = pal.cluster_border,
+        line = pal.line_color_css,
+        elbg = pal.edge_label_bg,
     );
-    format!("<style>{}</style>", CSS.replace("SVGID", &format!("#{ID}")))
+    format!("<style>{}</style>", css.replace("SVGID", &format!("#{ID}")))
 }
 
 /// Emit one layout scope's `g.root` (clusters, edgePaths, edgeLabels, nodes).
@@ -237,6 +274,7 @@ fn render_scope(
     owner: Option<usize>,
     parent_off: (f64, f64),
     roughness: f64,
+    pal: &Palette,
 ) {
     // A nested (extracted-subgraph) g.root carries the offset that positions its
     // (otherwise local) contents; the root g.root has no transform.
@@ -280,12 +318,12 @@ fn render_scope(
 
     s.push_str(r#"<g class="nodes">"#);
     for node in nodes.iter().filter(|n| n.home == owner) {
-        render_node(s, node, roughness);
+        render_node(s, node, roughness, pal);
     }
     // Nested extracted subgraphs belonging to this scope (clusters are pre-sorted
     // into mermaid's render order).
     for cluster in clusters.iter().filter(|c| c.extracted && c.home == owner) {
-        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off, roughness);
+        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off, roughness, pal);
     }
     s.push_str("</g>");
 
@@ -320,7 +358,7 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster) {
     s.push_str("</g></g></g>");
 }
 
-fn render_node(s: &mut String, node: &PlacedNode, roughness: f64) {
+fn render_node(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette) {
     // The hand-drawn look uses mermaid's rough-node group (`rough-node default`,
     // `data-look="handDrawn"`); the classic look uses the flat `node default`
     // group. mermaid emits a trailing space after `default` for rough nodes.
@@ -345,7 +383,7 @@ fn render_node(s: &mut String, node: &PlacedNode, roughness: f64) {
             round(node.cy),
         );
     }
-    render_shape(s, node, roughness);
+    render_shape(s, node, roughness, pal);
     // Icon shapes (fork/join, the state start/stop/junction circles, the crossed
     // circle, hourglass, lightning bolt) are fixed-size glyphs that mermaid draws
     // with *no* label: their handlers set `node.label = ""` and never call
@@ -392,15 +430,15 @@ fn class_suffix(classes: &[String]) -> String {
 }
 
 /// Emit the node's outline shape, centred at the group origin.
-fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
+fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette) {
     let (hw, hh) = (node.width / 2.0, node.height / 2.0);
     let st = style_attr(&node.shape_style);
     // Per-node hand-drawn colours (classDef/`style` fill/stroke, or theme
     // defaults). Baked into the rough paths for the hand-drawn look.
-    let (hd_fill, hd_stroke, hd_sw) = hand_drawn_colors(&node.shape_style);
+    let (hd_fill, hd_stroke, hd_sw) = hand_drawn_colors(&node.shape_style, pal);
     match node.shape {
         NodeShape::Rectangle | NodeShape::DataStore if is_hand_drawn(roughness) => {
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().rectangle(-hw, -hh, node.width, node.height, &o);
             let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
             emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
@@ -428,7 +466,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let is_stadium = matches!(node.shape, NodeShape::Stadium);
             let r = if is_stadium { hh } else { 5.0 };
             let d = rounded_rect_path(-hw, -hh, node.width, node.height, r);
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&d, &o);
             // The stadium (pill) carries mermaid's `outer-path` class and no
             // `style` attr; the rounded rectangle carries `style` and no
@@ -455,7 +493,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             );
         }
         NodeShape::Circle if is_hand_drawn(roughness) => {
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
             let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
             emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
@@ -478,7 +516,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [side / 2.0, -side],
                 [0.0, -side / 2.0],
             ];
-            emit_hd_polygon(s, &pts, -side / 2.0 + 0.5, side / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -side / 2.0 + 0.5, side / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::Rhombus => {
             // mermaid `question`: a square diamond of side `side`, points laid
@@ -508,7 +546,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [m, -h],
                 [0.0, -h / 2.0],
             ];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::Hexagon => {
             let (w, h) = (node.width, node.height);
@@ -528,7 +566,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let (w, h) = (node.width, node.height);
             let inset = hw - 8.0;
             let gen = roughr::Generator::new();
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let rect = gen.rectangle(-hw, -hh, w, h, &o);
             let left = gen.line(-inset, -hh, -inset, hh, &o);
             let right = gen.line(inset, -hh, inset, hh, &o);
@@ -556,7 +594,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         NodeShape::Parallelogram if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[-h / 2.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [0.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::Parallelogram => {
             let (w, h) = (node.width - node.height, node.height);
@@ -565,7 +603,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         NodeShape::LeanLeft if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[0.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [-h / 2.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::LeanLeft => {
             let (w, h) = (node.width - node.height, node.height);
@@ -574,7 +612,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         NodeShape::Trapezoid if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[-h / 2.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [0.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::Trapezoid => {
             let (w, h) = (node.width - node.height, node.height);
@@ -583,7 +621,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         NodeShape::InvTrapezoid if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[0.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [-h / 2.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness);
+            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
         }
         NodeShape::InvTrapezoid => {
             let (w, h) = (node.width - node.height, node.height);
@@ -615,7 +653,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 nw = round(-w),
             );
             let gen = roughr::Generator::new();
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let body = gen.path(&d, &o);
             let rim = gen.path(&top, &o);
             let _ = write!(
@@ -698,10 +736,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [-x, y],
                 [-x, y + off],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().polygon(&pts, &o);
             let _ = write!(s, r#"<g class="basic label-container outer-path">"#);
-            emit_rough_drawable(s, &drawable, true, &st);
+            emit_rough_drawable(s, &drawable, true, &st, pal);
             s.push_str("</g>");
         }
         // Lined/shaded process: mermaid `rc.polygon` — a rectangle plus a left
@@ -723,10 +761,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [x, y],
                 [x, y + h],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().polygon(&pts, &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
-            emit_rough_drawable(s, &drawable, true, &st);
+            emit_rough_drawable(s, &drawable, true, &st, pal);
             s.push_str("</g>");
         }
         // Window pane: mermaid renders it via rough.js `rc.path` with a single
@@ -746,10 +784,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 x - ro, y, x + w, y,
                 x, y - ro, x, y + h,
             );
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_d, &o);
             let _ = write!(s, r#"<g transform="translate(5, 5)" class="basic label-container outer-path">"#);
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Stacked rectangle / multi-process: mermaid draws an outer and an inner
@@ -784,12 +822,12 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [x + w, y],
                 [x, y],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let outer_d = roughr::Generator::new().path(&path_from_points(&outer), &o);
             let inner_d = roughr::Generator::new().path(&path_from_points(&inner), &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
-            emit_merged(s, &outer_d, &st);
-            emit_merged(s, &inner_d, &st);
+            emit_merged(s, &outer_d, &st, pal);
+            emit_merged(s, &inner_d, &st, pal);
             s.push_str("</g>");
         }
         // Notched rectangle (card): an exact `<polygon>` (insertPolygonShape), a
@@ -811,10 +849,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [-w, h],
                 [-w, -h * 0.6],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Triangle / flipped triangle: mermaid renders these via rough.js
@@ -826,7 +864,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             } else {
                 [[0.0, -h], [h, -h], [h / 2.0, 0.0]]
             };
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
@@ -834,7 +872,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-h / 2.0),
                 round(h / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Sloped rectangle (mermaid `rc.path`). The drawn height spans 1.5·h
@@ -845,14 +883,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let h = node.height / 1.5;
             let (x, y) = (-w / 2.0, -h / 2.0);
             let pts = [[x, y], [x, y + h], [x + w, y + h], [x + w, y - h / 2.0]];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container  outer-path" transform="translate(0, {})">"#,
                 round(h / 4.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Curved trapezoid (display): mermaid `rc.path` — trapezoid with an arced
@@ -871,7 +909,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [rw, h],
             ];
             pts.extend(generate_circle_points(-rw, -h / 2.0, radius, 50, 270.0, 90.0));
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
@@ -879,35 +917,36 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-w / 2.0),
                 round(-h / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Filled junction circle (filledCircle, r=7, no label): mermaid
         // `rc.circle` (solid), both paths styled `fill: nodeBorder !important`.
         NodeShape::FilledCircle => {
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
             s.push_str("<g>");
-            emit_drawable(s, &drawable, false, r#" style="fill: #9370DB !important;""#, Some("#ECECFF"), "#9370DB", "1.3");
+            let fc_style = format!(r#" style="fill: {} !important;""#, pal.node_border);
+            emit_drawable(s, &drawable, false, &fc_style, Some(pal.node_bkg), pal.node_border, "1.3");
             s.push_str("</g>");
         }
         // Framed stop circle (stateEnd): an outer `rc.circle` (stroke = line
-        // colour #333, width 2) and a filled inner `rc.circle` (fill/stroke =
-        // node border #9370DB). Inner is nested in its own `<g>`.
+        // colour, width 2) and a filled inner `rc.circle` (fill/stroke =
+        // node border). Inner is nested in its own `<g>`.
         NodeShape::FramedCircle => {
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let gen = roughr::Generator::new();
             let mut outer_o = o.clone();
-            outer_o.stroke = "#333333".to_string();
+            outer_o.stroke = pal.line_color.to_string();
             let outer = gen.circle(0.0, 0.0, node.width, &outer_o);
             let mut inner_o = o.clone();
-            inner_o.fill = Some("#9370DB".to_string());
-            inner_o.stroke = "#9370DB".to_string();
+            inner_o.fill = Some(pal.node_border.to_string());
+            inner_o.stroke = pal.node_border.to_string();
             let inner = gen.circle(0.0, 0.0, node.width * 5.0 / 14.0, &inner_o);
             s.push_str(r#"<g class="outer-path">"#);
-            emit_drawable(s, &outer, false, &st, Some("#ECECFF"), "#333333", "2");
+            emit_drawable(s, &outer, false, &st, Some(pal.node_bkg), pal.line_color, "2");
             s.push_str("<g>");
-            emit_drawable(s, &inner, false, &st, Some("#9370DB"), "#9370DB", "2");
+            emit_drawable(s, &inner, false, &st, Some(pal.node_border), pal.node_border, "2");
             s.push_str("</g></g>");
         }
         // Crossed circle (crossedCircle, r=30, no label): a `rc.circle` with an X
@@ -915,7 +954,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         // nested in its own `<g>`.
         NodeShape::CrossedCircle => {
             let r = node.width / 2.0;
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let gen = roughr::Generator::new();
             let circle = gen.circle(0.0, 0.0, node.width, &o);
             // mermaid's createLine: two diagonals through the ±45° points.
@@ -923,9 +962,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let line_d = format!("M {},{} L {},{}\n                   M {},{} L {},{}", -a, a, a, -a, a, a, -a, -a);
             let line = gen.path(&line_d, &o);
             s.push_str(r#"<g class="outer-path">"#);
-            emit_rough_drawable(s, &circle, false, &st);
+            emit_rough_drawable(s, &circle, false, &st, pal);
             s.push_str("<g>");
-            emit_rough_drawable(s, &line, false, &st);
+            emit_rough_drawable(s, &line, false, &st, pal);
             s.push_str("</g></g>");
         }
         // Odd (rect_left_inv_arrow): rectangle with a notched left edge, mermaid
@@ -944,14 +983,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [-x, -y],
                 [-x, y],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container outer-path" transform="translate({},0)">"#,
                 round(-notch / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Delay (halfRoundedRectangle): rectangle with a rounded right end, drawn
@@ -963,10 +1002,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             pts.extend(generate_circle_points(-w / 2.0 + radius, 0.0, radius, 50, 90.0, 270.0));
             pts.push([w / 2.0 - radius, h / 2.0]);
             pts.push([-w / 2.0, h / 2.0]);
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Document: mermaid renders it via rough.js `rc.path` — the outline is a
@@ -991,14 +1030,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             pts.push([w / 2.0, -final_h / 2.0]);
             pts.push([-w / 2.0, -final_h / 2.0]);
             let path_d = path_from_points(&pts);
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_d, &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
                 round(-wave_amp / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Lined document (linedWaveEdgedRect): rectangle with a wavy bottom edge
@@ -1021,14 +1060,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             pts.push([-w / 2.0, -final_h / 2.0]);
             pts.push([-w / 2.0, final_h / 2.0 * 1.1]);
             pts.push([-w / 2.0, -final_h / 2.0]);
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().polygon(&pts, &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
                 round(-wave_amp / 2.0),
             );
-            emit_rough_drawable(s, &drawable, true, &st);
+            emit_rough_drawable(s, &drawable, true, &st, pal);
             s.push_str("</g>");
         }
         // Tagged document (taggedWaveEdgedRectangle): a wave-edged document
@@ -1055,7 +1094,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [x + w, (y + h) * 0.9],
             ];
             tag.extend(full_sine_wave_points(x + w, (y + h) * 1.25, x + w - tag_w, (y + h) * 1.3, -h * 0.02, 0.5));
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let doc_d = roughr::Generator::new().path(&path_from_points(&doc), &o);
             let tag_d = roughr::Generator::new().path(&path_from_points(&tag), &o);
             let _ = write!(
@@ -1064,9 +1103,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-wave_amp / 2.0),
             );
             s.push_str("<g>");
-            emit_rough_drawable(s, &doc_d, false, &st);
+            emit_rough_drawable(s, &doc_d, false, &st, pal);
             s.push_str("</g>");
-            emit_rough_drawable(s, &tag_d, false, &st);
+            emit_rough_drawable(s, &tag_d, false, &st, pal);
             s.push_str("</g>");
         }
         // Stacked documents (multiWaveEdgedRectangle): an outer wave-edged
@@ -1105,7 +1144,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [x + w, y],
                 [x, y],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let outer_d = roughr::Generator::new().path(&path_from_points(&outer), &o);
             let inner_d = roughr::Generator::new().path(&path_from_points(&inner), &o);
             let _ = write!(
@@ -1113,9 +1152,9 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 r#"<g class="basic label-container outer-path" transform="translate(0,{})">"#,
                 round(-wave_amp / 2.0),
             );
-            emit_rough_drawable(s, &outer_d, false, &st);
+            emit_rough_drawable(s, &outer_d, false, &st, pal);
             s.push_str("<g>");
-            emit_rough_drawable(s, &inner_d, false, &st);
+            emit_rough_drawable(s, &inner_d, false, &st, pal);
             s.push_str("</g></g>");
         }
         // Tagged rectangle (taggedRect): a rectangle (rc.path, nested `<g>`) plus
@@ -1137,14 +1176,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [x + w + tag / 2.0, y + h],
                 [x + w + tag / 2.0, y + h - tag],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let rect_d = roughr::Generator::new().path(&path_from_points(&rect_pts), &o);
             let tag_d = roughr::Generator::new().path(&path_from_points(&tag_pts), &o);
             s.push_str(r#"<g class="basic label-container outer-path">"#);
             s.push_str("<g>");
-            emit_rough_drawable(s, &rect_d, false, &st);
+            emit_rough_drawable(s, &rect_d, false, &st, pal);
             s.push_str("</g>");
-            emit_rough_drawable(s, &tag_d, false, &st);
+            emit_rough_drawable(s, &tag_d, false, &st, pal);
             s.push_str("</g>");
         }
         // Bow-tie rectangle (bowTieRect): rectangle with concave (inward-arced)
@@ -1162,14 +1201,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             pts.extend(generate_arc_points(-w / 2.0, -h / 2.0, -w / 2.0, h / 2.0, rx, ry, false));
             pts.push([w / 2.0, h / 2.0]);
             pts.extend(generate_arc_points(w / 2.0, h / 2.0, w / 2.0, -h / 2.0, rx, ry, true));
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
                 r#"<g class="basic label-container outer-path" transform="translate({}, 0)">"#,
                 round(rx / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Wave rectangle (flag / paper tape): wavy top and bottom edges, mermaid
@@ -1184,10 +1223,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             pts.extend(full_sine_wave_points(-w / 2.0, final_h / 2.0, w / 2.0, final_h / 2.0, wave_amp, 1.0));
             pts.push([w / 2.0, -final_h / 2.0]);
             pts.extend(full_sine_wave_points(w / 2.0, -final_h / 2.0, -w / 2.0, -final_h / 2.0, wave_amp, -1.0));
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             s.push_str(r#"<g class="basic label-container">"#);
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Horizontal cylinder: a cylinder lying on its side (elliptical ends).
@@ -1226,16 +1265,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             );
         }
         // Fork/join: a thin solid bar (no label), mermaid `rc.rectangle` filled
-        // and stroked in the theme line colour (#333333). The shape `<g>` carries
-        // no class in the classic look.
+        // and stroked in the theme line colour. The shape `<g>` carries no class
+        // in the classic look.
         NodeShape::Fork => {
             let (w, h) = (node.width, node.height);
-            let mut o = rough_options(roughness);
-            o.fill = Some("#333333".to_string());
-            o.stroke = "#333333".to_string();
+            let mut o = rough_options(roughness, pal);
+            o.fill = Some(pal.line_color.to_string());
+            o.stroke = pal.line_color.to_string();
             let drawable = roughr::Generator::new().rectangle(-w / 2.0, -h / 2.0, w, h, &o);
             s.push_str("<g>");
-            emit_drawable(s, &drawable, false, &st, Some("#333333"), "#333333", "1.3");
+            emit_drawable(s, &drawable, false, &st, Some(pal.line_color), pal.line_color, "1.3");
             s.push_str("</g>");
         }
         // Text block: a borderless rectangle (label only).
@@ -1252,7 +1291,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
         NodeShape::Hourglass => {
             let (w, h) = (node.width, node.height);
             let pts = [[0.0, 0.0], [w, 0.0], [0.0, h], [w, h]];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
@@ -1260,7 +1299,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-w / 2.0),
                 round(-h / 2.0),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Lightning bolt: a zig-zag drawn by mermaid via `rc.path`. The dagre
@@ -1278,7 +1317,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 [width, height - gap / 2.0],
                 [2.0 * gap, height - gap / 2.0],
             ];
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
                 s,
@@ -1286,7 +1325,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 round(-width / 2.0),
                 round(-height),
             );
-            emit_rough_drawable(s, &drawable, false, &st);
+            emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
         // Bang / cloud: approximated as an ellipse blob (element + size match).
@@ -1311,7 +1350,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
             let w = node.width - if matches!(node.shape, NodeShape::Braces) { 12.5 } else { 10.0 };
             let h = node.height - 10.0;
             let r = (h * 0.1_f64).max(5.0);
-            let o = rough_options(roughness);
+            let o = rough_options(roughness, pal);
             let gen = roughr::Generator::new();
             // A fill:none `rc.path` (only its stroke `<path>` is emitted).
             let mut none_o = o.clone();
@@ -1324,7 +1363,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
                 }
                 let drawable = gen.path(&d, &none_o);
                 let _ = write!(s, "<g{gattr}>");
-                emit_drawable(s, &drawable, false, &st, None, "#9370DB", "1.3");
+                emit_drawable(s, &drawable, false, &st, None, pal.node_border, "1.3");
                 s.push_str("</g>");
             };
             match node.shape {
@@ -1418,16 +1457,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64) {
 /// node colour, theme border stroke, and the given `roughness` (0 for the
 /// classic look — its fill path is then the exact shape vertices). Mirrors
 /// mermaid's `userNodeOverrides(node, {})` + `roughness=0; fillStyle="solid"`.
-fn rough_options(roughness: f64) -> roughr::Options {
+fn rough_options(roughness: f64, pal: &Palette) -> roughr::Options {
     let gen = roughr::Generator::new();
     let mut o = gen.default_options();
     o.roughness = roughness;
-    o.fill = Some("#ECECFF".to_string());
+    o.fill = Some(pal.node_bkg.to_string());
     // Classic (roughness 0) fills solid — the fill path is then the exact shape
     // vertices, matching mermaid. The hand-drawn look (roughness > 0) fills with
     // rough.js's hachure (parallel sketch lines), matching mermaid's handDrawn.
     o.fill_style = if roughness > 0.0 { "hachure" } else { "solid" }.to_string();
-    o.stroke = "#9370DB".to_string();
+    o.stroke = pal.node_border.to_string();
     o.bowing = 1.0;
     o.seed = 1;
     // Match mermaid's `userNodeOverrides` so the hachure (hand-drawn fill) has
@@ -1465,9 +1504,9 @@ fn css_value(style: &str, prop: &str) -> Option<String> {
 /// paths (the fill colour draws the hachure lines, the stroke the outline)
 /// rather than onto the group's `style`, so per-node colours need threading
 /// into the drawable emission here.
-fn hand_drawn_colors(shape_style: &str) -> (String, String, String) {
-    let fill = css_value(shape_style, "fill").unwrap_or_else(|| "#ECECFF".to_string());
-    let stroke = css_value(shape_style, "stroke").unwrap_or_else(|| "#9370DB".to_string());
+fn hand_drawn_colors(shape_style: &str, pal: &Palette) -> (String, String, String) {
+    let fill = css_value(shape_style, "fill").unwrap_or_else(|| pal.node_bkg.to_string());
+    let stroke = css_value(shape_style, "stroke").unwrap_or_else(|| pal.node_border.to_string());
     let sw = css_value(shape_style, "stroke-width")
         .map(|w| w.trim_end_matches("px").trim().to_string())
         .unwrap_or_else(|| "1.3".to_string());
@@ -1506,10 +1545,10 @@ fn hd_style(shape_style: &str) -> String {
 /// Emit a hand-drawn polygon shape (rhombus / hexagon / slanted shapes): a
 /// `<g transform=… style=…>` wrapping the rough hachure-fill + outline paths,
 /// built from the same vertex array the classic look uses.
-fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_style: &str, roughness: f64) {
-    let o = rough_options(roughness);
+fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_style: &str, roughness: f64, pal: &Palette) {
+    let o = rough_options(roughness, pal);
     let drawable = roughr::Generator::new().polygon(points, &o);
-    let (fill, stroke, sw) = hand_drawn_colors(shape_style);
+    let (fill, stroke, sw) = hand_drawn_colors(shape_style, pal);
     let _ = write!(
         s,
         r#"<g transform="translate({}, {})"{}>"#,
@@ -1548,8 +1587,8 @@ fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, r: f64) -> String {
 /// `<g>`, and call this to emit the fill + stroke children.
 ///
 /// [`Drawable`]: roughr::Drawable
-fn emit_rough_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, st: &str) {
-    emit_drawable(s, drawable, evenodd, st, Some("#ECECFF"), "#9370DB", "1.3");
+fn emit_rough_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, st: &str, pal: &Palette) {
+    emit_drawable(s, drawable, evenodd, st, Some(pal.node_bkg), pal.node_border, "1.3");
 }
 
 /// General form of [`emit_rough_drawable`] with explicit colours. When `fill` is
@@ -1597,13 +1636,15 @@ fn emit_drawable(
 /// stacked-rectangle / multi-process handler for the classic look).
 ///
 /// [`Drawable`]: roughr::Drawable
-fn emit_merged(s: &mut String, drawable: &roughr::Drawable, st: &str) {
+fn emit_merged(s: &mut String, drawable: &roughr::Drawable, st: &str, pal: &Palette) {
     let fill = drawable.fill_path(None);
     let stroke = drawable.stroke_path(None);
     let d = if fill.is_empty() { stroke } else { format!("{fill} {stroke}") };
     let _ = write!(
         s,
-        r##"<g><path d="{d}" fill="#ECECFF" fill-opacity="1" stroke="#9370DB" stroke-width="1.3" stroke-opacity="1"{st}/></g>"##,
+        r##"<g><path d="{d}" fill="{fill_c}" fill-opacity="1" stroke="{stroke_c}" stroke-width="1.3" stroke-opacity="1"{st}/></g>"##,
+        fill_c = pal.node_bkg,
+        stroke_c = pal.node_border,
     );
 }
 

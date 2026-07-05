@@ -35,6 +35,9 @@ pub struct LaidOutFlowchart {
     /// Visual look (propagated from [`crate::ir::Flowchart::look`]); selects the
     /// rough.js roughness the renderer uses for node shapes.
     pub look: crate::ir::Look,
+    /// Colour theme (propagated from [`crate::ir::Flowchart::theme`]); selects
+    /// the palette the renderer paints default colours from.
+    pub theme: crate::ir::Theme,
     pub title: Option<String>,
     pub acc_title: Option<String>,
     pub acc_descr: Option<String>,
@@ -658,6 +661,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
             edges: Vec::new(),
             clusters: Vec::new(),
             look: chart.look,
+            theme: chart.theme,
             title: chart.title.clone(),
             acc_title: chart.acc_title.clone(),
             acc_descr: chart.acc_descr.clone(),
@@ -832,6 +836,7 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
         edges,
         clusters,
         look: chart.look,
+        theme: chart.theme,
         title: chart.title.clone(),
         acc_title: chart.acc_title.clone(),
         acc_descr: chart.acc_descr.clone(),

@@ -46,6 +46,125 @@ impl Look {
     }
 }
 
+/// The colour theme of a diagram (mermaid frontmatter `config.theme`). Selects
+/// the [`Palette`] the renderer paints node/cluster/edge colours from. Defaults
+/// to [`Theme::Default`] (mermaid's built-in default theme).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Theme {
+    /// mermaid's built-in default theme (purple nodes on white).
+    #[default]
+    Default,
+    /// `theme: base` — the light beige/amber base theme.
+    Base,
+    /// `theme: forest` — greens.
+    Forest,
+    /// `theme: dark` — light-on-dark greys.
+    Dark,
+    /// `theme: neutral` — greyscale.
+    Neutral,
+}
+
+/// The concrete colours a theme paints. The renderer pulls every default node,
+/// cluster, edge, marker and text colour from here so a diagram's `config.theme`
+/// selects mermaid's matching palette. Inline `classDef`/`style` colours still
+/// win (they are emitted as inline `style` attributes, which override these
+/// theme defaults) — only the *defaults* change per theme.
+///
+/// Values are the exact strings mermaid emits, probed from the mermaid CLI per
+/// theme (`node fill/stroke`, `cluster fill/stroke`, `lineColor`, node text
+/// colour and edge-label background). `line_color` is the form used in shape
+/// presentation attributes (e.g. `#333333`); `line_color_css` is the (possibly
+/// abbreviated) form mermaid writes into the `<style>` block (e.g. `#333`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    /// Node shape fill (mermaid `mainBkg`/`nodeBkg`).
+    pub node_bkg: &'static str,
+    /// Node shape border (mermaid `nodeBorder`).
+    pub node_border: &'static str,
+    /// Cluster (subgraph) rect fill.
+    pub cluster_bkg: &'static str,
+    /// Cluster (subgraph) rect border.
+    pub cluster_border: &'static str,
+    /// Line/marker/fork colour, in shape presentation-attribute form.
+    pub line_color: &'static str,
+    /// Line/marker colour as mermaid writes it into the `<style>` block.
+    pub line_color_css: &'static str,
+    /// Node/label text colour (and the root `fill`), for the `<style>` block.
+    pub text_color: &'static str,
+    /// Edge-label background colour, for the `<style>` block.
+    pub edge_label_bg: &'static str,
+    /// The two `<stop>` colours of the `<linearGradient id="…-gradient">` that
+    /// mermaid appends to the SVG for every *non-default* theme (used by the neo
+    /// look's gradient stroke). `None` for the default theme, which emits no
+    /// gradient element — matching mermaid and keeping default output identical.
+    pub gradient_stops: Option<(&'static str, &'static str)>,
+}
+
+impl Theme {
+    /// The [`Palette`] for this theme (colours probed from the mermaid CLI).
+    pub fn palette(self) -> Palette {
+        match self {
+            // Default palette = the values carcimaid hardcoded before theme
+            // support, so default-theme output stays byte-identical.
+            Theme::Default => Palette {
+                node_bkg: "#ECECFF",
+                node_border: "#9370DB",
+                cluster_bkg: "#ffffde",
+                cluster_border: "#aaaa33",
+                line_color: "#333333",
+                line_color_css: "#333",
+                text_color: "#333",
+                edge_label_bg: "rgba(232,232,232,0.8)",
+                gradient_stops: None,
+            },
+            Theme::Base => Palette {
+                node_bkg: "#fff4dd",
+                node_border: "hsl(40.5882352941, 60%, 83.3333333333%)",
+                cluster_bkg: "hsl(220.5882352941, 100%, 98.3333333333%)",
+                cluster_border: "hsl(220.5882352941, 60%, 88.3333333333%)",
+                line_color: "#0b0b0b",
+                line_color_css: "#0b0b0b",
+                text_color: "#333",
+                edge_label_bg: "hsl(-79.4117647059, 100%, 93.3333333333%)",
+                gradient_stops: Some(("hsl(40.5882352941, 60%, 83.3333333333%)", "hsl(-79.4117647059, 60%, 83.3333333333%)")),
+            },
+            Theme::Forest => Palette {
+                node_bkg: "#cde498",
+                node_border: "#13540c",
+                cluster_bkg: "#cdffb2",
+                cluster_border: "#6eaa49",
+                line_color: "#000000",
+                line_color_css: "#000000",
+                text_color: "#000000",
+                edge_label_bg: "#e8e8e8",
+                gradient_stops: Some(("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)", "hsl(98.961038961, 60%, 74.9019607843%)")),
+            },
+            Theme::Dark => Palette {
+                node_bkg: "#1f2020",
+                node_border: "#ccc",
+                cluster_bkg: "hsl(180, 1.5873015873%, 28.3529411765%)",
+                cluster_border: "rgba(255, 255, 255, 0.25)",
+                line_color: "lightgrey",
+                line_color_css: "lightgrey",
+                text_color: "#ccc",
+                edge_label_bg: "hsl(0, 0%, 34.4117647059%)",
+                gradient_stops: Some(("#cccccc", "hsl(180, 0%, 18.3529411765%)")),
+            },
+            Theme::Neutral => Palette {
+                node_bkg: "#eee",
+                node_border: "#999",
+                cluster_bkg: "hsl(0, 0%, 98.9215686275%)",
+                cluster_border: "#707070",
+                line_color: "#666",
+                line_color_css: "#666",
+                text_color: "#000000",
+                edge_label_bg: "white",
+                gradient_stops: Some(("hsl(0, 0%, 83.3333333333%)", "hsl(0, 0%, 88.9215686275%)")),
+            },
+        }
+    }
+}
+
 /// A flowchart: a directed graph of [`Node`]s connected by [`Edge`]s, with
 /// optional [`Subgraph`] groupings.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -54,6 +173,9 @@ pub struct Flowchart {
     /// Visual look (`look:` frontmatter). Selects rough.js roughness; defaults
     /// to [`Look::Classic`]. Parsed from the top-level `config.look` key.
     pub look: Look,
+    /// Colour theme (`config.theme` frontmatter). Selects the [`Palette`];
+    /// defaults to [`Theme::Default`].
+    pub theme: Theme,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub subgraphs: Vec<Subgraph>,

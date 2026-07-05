@@ -4,7 +4,7 @@
 //! line and dispatches to a per-type parser. Only flowcharts are implemented so
 //! far; other types return [`Error::Unsupported`].
 
-use crate::ir::{Diagram, Look};
+use crate::ir::{Diagram, Look, Theme};
 use crate::{Error, Result};
 
 pub mod flowchart;
@@ -15,6 +15,7 @@ pub fn parse(source: &str) -> Result<Diagram> {
     let node_spacing = frontmatter_flowchart_num(source, "nodeSpacing");
     let rank_spacing = frontmatter_flowchart_num(source, "rankSpacing");
     let look = frontmatter_look(source).or_else(|| init_look(source));
+    let theme = frontmatter_theme(source);
     let source = strip_frontmatter(source);
     let header = first_keyword(source)
         .ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
@@ -27,6 +28,9 @@ pub fn parse(source: &str) -> Result<Diagram> {
             f.rank_spacing = rank_spacing;
             if let Some(lk) = look {
                 f.look = lk;
+            }
+            if let Some(th) = theme {
+                f.theme = th;
             }
             Ok(Diagram::Flowchart(f))
         }
@@ -84,6 +88,40 @@ fn frontmatter_look(source: &str) -> Option<Look> {
         }
     }
     None
+}
+
+/// Read the top-level `config.theme` from the frontmatter, mapping mermaid's
+/// theme names to a [`Theme`]. Like `look`, `theme:` is a sibling of
+/// `flowchart:` inside `config:`; the `flowchart:` sub-map has no `theme:` key,
+/// so a lightweight scan for the first `theme:` line in the frontmatter block
+/// suffices. Returns `None` for unknown/absent themes (renderer uses default).
+fn frontmatter_theme(source: &str) -> Option<Theme> {
+    let mut lines = source.lines().skip_while(|l| l.trim().is_empty());
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for l in lines {
+        let t = l.trim();
+        if t == "---" {
+            break;
+        }
+        if let Some(v) = t.strip_prefix("theme:") {
+            return theme_from_str(v.trim().trim_matches(['"', '\'']));
+        }
+    }
+    None
+}
+
+/// Map a mermaid `theme` config value to a [`Theme`].
+fn theme_from_str(v: &str) -> Option<Theme> {
+    match v {
+        "default" => Some(Theme::Default),
+        "base" => Some(Theme::Base),
+        "forest" => Some(Theme::Forest),
+        "dark" => Some(Theme::Dark),
+        "neutral" => Some(Theme::Neutral),
+        _ => None,
+    }
 }
 
 /// Read `look` from a `%%{init: {"look":"handDrawn"}}%%` directive line, if any.
@@ -180,6 +218,26 @@ mod tests {
     fn defaults_to_classic_look() {
         let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap();
         assert_eq!(f.look, Look::Classic);
+    }
+
+    #[test]
+    fn parses_theme_forest() {
+        let src = "---\nconfig:\n  theme: forest\n---\nflowchart TD\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap();
+        assert_eq!(f.theme, Theme::Forest);
+    }
+
+    #[test]
+    fn parses_theme_base_with_other_config() {
+        let src = "---\ntitle: T\nconfig:\n  theme: base\n  flowchart:\n    curve: cardinal\n---\nflowchart LR\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap();
+        assert_eq!(f.theme, Theme::Base);
+    }
+
+    #[test]
+    fn defaults_to_default_theme() {
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap();
+        assert_eq!(f.theme, Theme::Default);
     }
 
     #[test]
