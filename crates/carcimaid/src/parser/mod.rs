@@ -8,6 +8,7 @@ use crate::ir::{Diagram, Look, Theme};
 use crate::{Error, Result};
 
 pub mod flowchart;
+pub mod sequence;
 
 /// Parse mermaid source into a [`Diagram`].
 pub fn parse(source: &str) -> Result<Diagram> {
@@ -33,6 +34,13 @@ pub fn parse(source: &str) -> Result<Diagram> {
                 f.theme = th;
             }
             Ok(Diagram::Flowchart(f))
+        }
+        "sequenceDiagram" => {
+            let mut s = sequence::parse(source)?;
+            if s.title.is_none() {
+                s.title = title; // visible title from frontmatter
+            }
+            Ok(Diagram::Sequence(s))
         }
         other => Err(Error::Unsupported(format!("diagram type `{other}`"))),
     }
@@ -203,40 +211,40 @@ mod tests {
     fn strips_frontmatter_then_parses() {
         let src = "---\ntitle: My Chart\nconfig:\n  flowchart:\n    curve: linear\n---\nflowchart TD\n A --> B";
         let diagram = parse(src).unwrap();
-        let Diagram::Flowchart(f) = diagram;
+        let Diagram::Flowchart(f) = diagram else { unreachable!() };
         assert_eq!(f.nodes.len(), 2);
     }
 
     #[test]
     fn parses_handdrawn_look() {
         let src = "---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap();
+        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
         assert_eq!(f.look, Look::HandDrawn);
     }
 
     #[test]
     fn defaults_to_classic_look() {
-        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap();
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else { unreachable!() };
         assert_eq!(f.look, Look::Classic);
     }
 
     #[test]
     fn parses_theme_forest() {
         let src = "---\nconfig:\n  theme: forest\n---\nflowchart TD\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap();
+        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
         assert_eq!(f.theme, Theme::Forest);
     }
 
     #[test]
     fn parses_theme_base_with_other_config() {
         let src = "---\ntitle: T\nconfig:\n  theme: base\n  flowchart:\n    curve: cardinal\n---\nflowchart LR\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap();
+        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
         assert_eq!(f.theme, Theme::Base);
     }
 
     #[test]
     fn defaults_to_default_theme() {
-        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap();
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else { unreachable!() };
         assert_eq!(f.theme, Theme::Default);
     }
 

@@ -51,6 +51,11 @@ const TITLE_MARGIN: f64 = 8.0;
 pub fn to_svg(diagram: &LaidOut) -> String {
     match diagram {
         LaidOut::Flowchart(f) => flowchart_svg(f),
+        // Sequence rendering is being built out (task #19). Emit a minimal but
+        // valid sequence-tagged SVG so the pipeline runs end-to-end.
+        LaidOut::Sequence(_) => String::from(
+            r#"<svg id="my-svg" width="0" height="0" viewBox="0 0 0 0" role="graphics-document document" aria-roledescription="sequence"></svg>"#,
+        ),
     }
 }
 

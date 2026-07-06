@@ -8,6 +8,8 @@
 pub enum Diagram {
     /// `flowchart` / `graph` diagrams.
     Flowchart(Flowchart),
+    /// `sequenceDiagram` diagrams.
+    Sequence(SequenceDiagram),
 }
 
 /// Flow direction, mirroring mermaid's `TD`/`TB`/`BT`/`LR`/`RL`.
@@ -399,4 +401,147 @@ pub struct Edge {
     /// of dashes/dots: `-->` is 1, `--->` is 2, `---->` is 3, etc. Extra
     /// dashes make an edge span more ranks, stretching the layout.
     pub min_len: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Sequence diagrams (`sequenceDiagram`).
+// ---------------------------------------------------------------------------
+
+/// A parsed `sequenceDiagram`: an ordered list of [`Participant`]s and a flat,
+/// ordered list of [`SeqEvent`]s (messages, notes, block boundaries,
+/// activations), mirroring mermaid's linear message model — layout steps
+/// vertically through the events in order.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SequenceDiagram {
+    /// Visible title (`title:` line), if any.
+    pub title: Option<String>,
+    pub acc_title: Option<String>,
+    pub acc_descr: Option<String>,
+    /// Participants in first-seen (left-to-right) order.
+    pub participants: Vec<Participant>,
+    /// The ordered event stream.
+    pub events: Vec<SeqEvent>,
+}
+
+impl SequenceDiagram {
+    /// Index of the participant with id `id`, if declared.
+    pub fn participant_index(&self, id: &str) -> Option<usize> {
+        self.participants.iter().position(|p| p.id == id)
+    }
+}
+
+/// A sequence participant (a lifeline). `actor` participants render as a stick
+/// figure; plain `participant`s render as a labelled box.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Participant {
+    /// The identifier used in messages.
+    pub id: String,
+    /// Display label (the `as` alias, else the id).
+    pub label: String,
+    /// `true` for the `actor` keyword (stick figure), `false` for `participant`.
+    pub is_actor: bool,
+}
+
+/// One entry in the sequence's ordered event stream.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SeqEvent {
+    Message(SeqMessage),
+    Note(SeqNote),
+    /// Turn a participant's activation bar on (`activate X` or `+` on a message).
+    Activate(usize),
+    /// Turn a participant's activation bar off (`deactivate X` or `-`).
+    Deactivate(usize),
+    /// A block boundary (loop/alt/opt/par/critical/break/rect). The linear
+    /// start/else/end model matches mermaid's LINETYPE stream.
+    Block(BlockBoundary),
+    /// `autonumber [start [step]]` / `autonumber off` — toggles numbering.
+    Autonumber(Option<(i64, i64)>),
+}
+
+/// A message (arrow) between two participants.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqMessage {
+    /// Index into [`SequenceDiagram::participants`].
+    pub from: usize,
+    pub to: usize,
+    pub text: String,
+    pub arrow: SeqArrow,
+    /// `+`/`-` activation suffix: activate the target / deactivate the source.
+    pub activate: bool,
+    pub deactivate: bool,
+}
+
+/// A note attached to one or more participants.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqNote {
+    pub placement: NotePlacement,
+    /// Participant indices the note spans (one for left/right of, one or two
+    /// for `over`).
+    pub actors: Vec<usize>,
+    pub text: String,
+}
+
+/// Where a note sits relative to its participant(s).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotePlacement {
+    LeftOf,
+    RightOf,
+    Over,
+}
+
+/// A block-construct boundary marker in the event stream.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockBoundary {
+    LoopStart(String),
+    LoopEnd,
+    AltStart(String),
+    AltElse(String),
+    AltEnd,
+    OptStart(String),
+    OptEnd,
+    ParStart(String),
+    ParAnd(String),
+    ParEnd,
+    /// `rect <color>` … `end` — a coloured background region.
+    RectStart(String),
+    RectEnd,
+}
+
+/// The visual style of a sequence message arrow (line pattern + head shape).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeqArrow {
+    /// `->>` — solid line, filled arrowhead.
+    SolidArrow,
+    /// `-->>` — dotted line, filled arrowhead.
+    DottedArrow,
+    /// `->` — solid line, open (stick) arrowhead.
+    SolidOpen,
+    /// `-->` — dotted line, open arrowhead.
+    DottedOpen,
+    /// `-x` — solid line, cross head.
+    SolidCross,
+    /// `--x` — dotted line, cross head.
+    DottedCross,
+    /// `-)` — solid line, open half-arrow (async).
+    SolidPoint,
+    /// `--)` — dotted line, open half-arrow (async).
+    DottedPoint,
+    /// `<<->>` — solid line, filled heads both ends (bidirectional).
+    BiSolid,
+    /// `<<-->>` — dotted line, filled heads both ends (bidirectional).
+    BiDotted,
+}
+
+impl SeqArrow {
+    /// `true` if the line is dotted (rendered with a dash pattern).
+    pub fn is_dotted(self) -> bool {
+        matches!(
+            self,
+            SeqArrow::DottedArrow
+                | SeqArrow::DottedOpen
+                | SeqArrow::DottedCross
+                | SeqArrow::DottedPoint
+                | SeqArrow::BiDotted
+        )
+    }
 }

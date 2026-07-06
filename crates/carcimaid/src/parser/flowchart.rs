@@ -866,7 +866,7 @@ mod tests {
             "---\ntitle: My Chart\n---\nflowchart LR\n accTitle: Acc T\n accDescr: Acc D\n A --> B",
         )
         .unwrap();
-        let crate::ir::Diagram::Flowchart(f) = d;
+        let crate::ir::Diagram::Flowchart(f) = d else { unreachable!() };
         assert_eq!(f.title.as_deref(), Some("My Chart"));
         assert_eq!(f.acc_title.as_deref(), Some("Acc T"));
         assert_eq!(f.acc_descr.as_deref(), Some("Acc D"));

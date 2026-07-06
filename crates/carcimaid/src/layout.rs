@@ -18,6 +18,10 @@ use dagre::layout::layout as dagre_layout;
 #[derive(Debug, Clone, PartialEq)]
 pub enum LaidOut {
     Flowchart(LaidOutFlowchart),
+    /// A sequence diagram. Geometry assignment is still being built out
+    /// (task #19); for now the parsed model is carried through so the renderer
+    /// can compute placement inline.
+    Sequence(crate::ir::SequenceDiagram),
 }
 
 /// A flowchart with concrete geometry.
@@ -145,6 +149,7 @@ const MARGIN: f64 = 8.0;
 pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
     match diagram {
         Diagram::Flowchart(f) => Ok(LaidOut::Flowchart(layout_flowchart(f))),
+        Diagram::Sequence(s) => Ok(LaidOut::Sequence(s.clone())),
     }
 }
 
@@ -875,6 +880,7 @@ mod tests {
     fn flowchart(src: &str) -> LaidOutFlowchart {
         match layout(&parser::parse(src).unwrap()).unwrap() {
             LaidOut::Flowchart(f) => f,
+            _ => unreachable!("expected a flowchart"),
         }
     }
 
