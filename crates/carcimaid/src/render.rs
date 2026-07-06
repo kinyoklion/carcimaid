@@ -756,6 +756,19 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 ty = round(-node.height / 2.0),
             );
         }
+        // Hand-drawn start circle (stateStart): a small rough circle (r=7)
+        // rendered like any other node — node-fill hachure + border stroke.
+        // (mermaid's markup carries `fill="none"`/black paths, but its forest
+        // theme CSS overrides them with the node fill/border via `!important`;
+        // we bake the theme colours straight into the paths.) Without this the
+        // classic branch's `<circle fill:#000000>` draws a solid black disc.
+        NodeShape::SmallCircle if is_hand_drawn(roughness) => {
+            let o = rough_options(roughness, pal);
+            let drawable = roughr::Generator::new().circle(0.0, 0.0, 14.0, &o);
+            s.push_str(r#"<g class="state-start" r="7" width="14" height="14">"#);
+            emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
+            s.push_str("</g>");
+        }
         // Small start circle: fixed r=7, no label. mermaid emits width/height too.
         NodeShape::SmallCircle => {
             let _ = write!(
