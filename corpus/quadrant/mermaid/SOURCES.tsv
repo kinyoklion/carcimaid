@@ -1,0 +1,16 @@
+file	source	block
+demo-quadrantchart_000.mmd	demos/quadrantchart.html	0
+demo-quadrantchart_001.mmd	demos/quadrantchart.html	1
+quadrantChart_001.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	1
+quadrantChart_002.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	2
+quadrantChart_003.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	3
+quadrantChart_004.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	4
+quadrantChart_005.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	5
+quadrantChart_006.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	6
+quadrantChart_007.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	7
+quadrantChart_008.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	8
+quadrantChart_009.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	9
+quadrantChart_010.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	10
+quadrantChart_011.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	11
+quadrantChart_012.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	12
+quadrantChart_013.mmd	cypress/integration/rendering/quadrant-chart/quadrantChart.spec.js	13

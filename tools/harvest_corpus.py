@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Harvest flowchart diagram sources from a mermaid checkout into the corpus.
+"""Harvest mermaid diagram sources from a mermaid checkout into the corpus.
 
 Usage:
-    python3 tools/harvest_corpus.py <mermaid-checkout> <out-dir>
+    python3 tools/harvest_corpus.py <mermaid-checkout> <out-dir> [--only TYPE,TYPE]
 
-Extracts mermaid `flowchart`/`graph` definitions from mermaid's cypress
-rendering specs (backtick template literals, skipping ${...}-interpolated ones)
-and from the `demos/*.html` files (`<pre class="mermaid">` blocks), dedupes
-them, writes one `.mmd` per diagram, and records provenance in `SOURCES.tsv`.
+Extracts mermaid diagram definitions from mermaid's cypress rendering specs
+(backtick template literals, skipping ${...}-interpolated ones) and from the
+`demos/*.html` files (`<pre class="mermaid">` blocks), detects each diagram's
+type from its header keyword, dedupes, and writes one `.mmd` per diagram under
+`<out-dir>/<type>/mermaid/`, recording provenance in a per-type `SOURCES.tsv`.
+
+`--only TYPE,TYPE` restricts output to the given comma-separated type dirs (e.g.
+`--only sequence,class`); use it to harvest new types without touching a
+hand-curated `corpus/flowchart/`.
 
 mermaid is MIT-licensed (Copyright (c) 2014 - 2022 Knut Sveidqvist); the
 harvested diagrams are vendored under that license. See `corpus/ATTRIBUTION.md`.
@@ -17,26 +22,87 @@ import re
 import sys
 from pathlib import Path
 
+# Map a diagram's leading header keyword (lowercased, trailing `:` stripped) to
+# the corpus type directory it belongs in. Covers the mermaid 11.x diagram
+# headers; several have `-v2`/`-beta` suffixes or C4 sub-variants.
+TYPE_BY_KEYWORD = {
+    "graph": "flowchart",
+    "flowchart": "flowchart",
+    "flowchart-elk": "flowchart",
+    "sequencediagram": "sequence",
+    "classdiagram": "class",
+    "classdiagram-v2": "class",
+    "statediagram": "state",
+    "statediagram-v2": "state",
+    "erdiagram": "er",
+    "gantt": "gantt",
+    "pie": "pie",
+    "journey": "journey",
+    "gitgraph": "git",
+    "mindmap": "mindmap",
+    "timeline": "timeline",
+    "quadrantchart": "quadrant",
+    "requirementdiagram": "requirement",
+    "requirement": "requirement",
+    "c4context": "c4",
+    "c4container": "c4",
+    "c4component": "c4",
+    "c4dynamic": "c4",
+    "c4deployment": "c4",
+    "sankey-beta": "sankey",
+    "sankey": "sankey",
+    "xychart-beta": "xychart",
+    "xychart": "xychart",
+    "block-beta": "block",
+    "block": "block",
+    "packet-beta": "packet",
+    "packet": "packet",
+    "kanban": "kanban",
+    "architecture-beta": "architecture",
+    "architecture": "architecture",
+    "radar-beta": "radar",
+    "radar": "radar",
+    "treemap": "treemap",
+    "treemap-beta": "treemap",
+    "zenuml": "zenuml",
+    "info": "info",
+}
 
-def is_flowchart(text: str) -> bool:
-    """A flowchart/graph diagram with at least one statement after the header
-    (skips degenerate fixtures like a bare `flowchart`)."""
+
+def significant_lines(text: str):
+    """The diagram's body lines, skipping YAML frontmatter, `%%{init}%%`
+    directives, and `%%` comments/blank lines."""
     lines = text.splitlines()
     i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    # Leading YAML frontmatter (`---` … `---`).
     if i < len(lines) and lines[i].strip() == "---":
         i += 1
         while i < len(lines) and lines[i].strip() != "---":
             i += 1
         i += 1
-    body = [l.strip() for l in lines[i:] if l.strip() and not l.strip().startswith("%%")]
+    return [s for l in lines[i:] if (s := l.strip()) and not s.startswith("%%")]
+
+
+def detect_type(text: str):
+    """Return the corpus type dir for `text`, or None if its header keyword is
+    not a recognised diagram type (filters out non-diagram backtick blocks)."""
+    body = significant_lines(text)
     if not body:
-        return False
+        return None
     head = body[0].split()
-    if (head[0] if head else "") not in ("flowchart", "graph"):
-        return False
-    # Require a real body: either more lines, or a header line that also carries
-    # statements (e.g. `graph TD; A-->B`).
-    return len(body) > 1 or len(head) > 2 or ";" in body[0]
+    if not head:
+        return None
+    kw = head[0].rstrip(":").lower()  # `gitGraph:` -> `gitgraph`
+    typ = TYPE_BY_KEYWORD.get(kw)
+    if typ is None:
+        return None
+    # Require a real body: more than the header alone, or a header line that
+    # also carries statements (`graph TD; A-->B`).
+    if len(body) > 1 or len(head) > 2 or ";" in body[0]:
+        return typ
+    return None
 
 
 def extract_backticks(src: str):
@@ -83,48 +149,66 @@ def dedent(text: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
+    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+    only = None
+    for i, a in enumerate(sys.argv[1:], start=1):
+        if a == "--only" and i < len(sys.argv) - 1:
+            only = {t.strip() for t in sys.argv[i + 1].split(",") if t.strip()}
+            positional = [p for p in positional if p != sys.argv[i + 1]]
+        elif a.startswith("--only="):
+            only = {t.strip() for t in a[len("--only="):].split(",") if t.strip()}
+    if len(positional) < 2:
         print(__doc__)
         return 2
-    mermaid, out = Path(sys.argv[1]), Path(sys.argv[2])
+    mermaid, out = Path(positional[0]), Path(positional[1])
     out.mkdir(parents=True, exist_ok=True)
 
     sources = [
-        *sorted(mermaid.glob("cypress/integration/rendering/flowchart/*.spec.js")),
-        *sorted(mermaid.glob("cypress/integration/rendering/flowchart/*.spec.ts")),
-        *sorted(mermaid.glob("demos/flowchart*.html")),
-        *sorted(mermaid.glob("demos/dataflowchart.html")),
+        *sorted(mermaid.glob("cypress/integration/rendering/**/*.spec.js")),
+        *sorted(mermaid.glob("cypress/integration/rendering/**/*.spec.ts")),
+        *sorted(mermaid.glob("demos/*.html")),
     ]
 
-    seen, manifest, count = set(), [], 0
+    seen = set()
+    manifests: dict[str, list] = {}
+    counts: dict[str, int] = {}
     for path in sources:
         text = path.read_text(encoding="utf-8", errors="replace")
         extractor = extract_html if path.suffix == ".html" else extract_backticks
         rel = path.relative_to(mermaid).as_posix()
         for block_idx, raw in enumerate(extractor(text)):
             diagram = dedent(raw)
-            if not diagram or not is_flowchart(diagram):
+            if not diagram:
+                continue
+            typ = detect_type(diagram)
+            if typ is None or (only is not None and typ not in only):
                 continue
             key = diagram.strip()
             if key in seen:
                 continue
             seen.add(key)
-            stem = path.name.replace(".spec.js", "").replace(".spec.ts", "").replace(
-                ".html", ""
+            stem = (
+                path.name.replace(".spec.js", "").replace(".spec.ts", "").replace(".html", "")
             )
             if "demos/" in rel:
                 stem = "demo-" + stem
+            counts[typ] = counts.get(typ, 0) + 1
             name = f"{stem}_{block_idx:03d}.mmd"
-            (out / name).write_text(diagram + "\n", encoding="utf-8")
-            manifest.append((name, rel, block_idx))
-            count += 1
+            dest_dir = out / typ / "mermaid"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / name).write_text(diagram + "\n", encoding="utf-8")
+            manifests.setdefault(typ, []).append((name, rel, block_idx))
 
-    with (out / "SOURCES.tsv").open("w", encoding="utf-8") as f:
-        f.write("file\tsource\tblock\n")
-        for name, rel, idx in sorted(manifest):
-            f.write(f"{name}\t{rel}\t{idx}\n")
+    total = 0
+    for typ, manifest in sorted(manifests.items()):
+        with (out / typ / "mermaid" / "SOURCES.tsv").open("w", encoding="utf-8") as f:
+            f.write("file\tsource\tblock\n")
+            for name, rel, idx in sorted(manifest):
+                f.write(f"{name}\t{rel}\t{idx}\n")
+        print(f"  {typ:14s} {len(manifest):4d}")
+        total += len(manifest)
 
-    print(f"wrote {count} diagrams to {out}")
+    print(f"wrote {total} diagrams across {len(manifests)} types to {out}")
     return 0
 
 
