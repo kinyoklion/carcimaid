@@ -325,6 +325,7 @@ fn parse_statement(stmt: &str, chart: &mut Flowchart, current: Option<usize>) {
                     arrow_start: op.start,
                     arrow_end: op.end,
                     link_style: Vec::new(),
+                    min_len: op.length,
                 });
             }
         }
@@ -373,6 +374,8 @@ struct EdgeOp {
     start: ArrowType,
     end: ArrowType,
     label: Option<String>,
+    /// Rank span (dagre `minlen`) from the dash/dot count; see [`Edge::min_len`].
+    length: usize,
 }
 
 /// Split a statement into endpoint strings and the operators between them,
@@ -420,7 +423,7 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                 // `o`/`x` start arrows are only valid at a token boundary, else
                 // they'd match the trailing letter of an id like `foo-->` / `box-->`.
                 let boundary = cur.chars().last().is_none_or(char::is_whitespace);
-                if let Some((len, style, start, end, mid)) = detect_link(&stmt[i..], boundary) {
+                if let Some((len, style, start, end, mid, length)) = detect_link(&stmt[i..], boundary) {
                     endpoints.push(cur.trim().to_string());
                     cur = String::new();
                     i += len;
@@ -443,7 +446,7 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                             None
                         }
                     };
-                    ops.push(EdgeOp { style, start, end, label });
+                    ops.push(EdgeOp { style, start, end, label, length });
                 } else {
                     // The odd/flag shape `id>text]` opens with `>` and closes
                     // with `]`; count it as a bracket so the trailing `]` keeps
@@ -466,10 +469,13 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
 }
 
 /// Detect an edge link at the start of `s`, returning its byte length, style,
-/// start/end arrow types, and any `-- text --` middle label. Handles solid
-/// (`--`), thick (`==`), and dotted (`-.-`) links, optional start arrows
-/// (`<`/`x`/`o`), optional end arrows (`>`/`x`/`o`), and inline middle text.
-fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, ArrowType, Option<String>)> {
+/// start/end arrow types, any `-- text --` middle label, and the edge's rank
+/// span (`minlen`). Handles solid (`--`), thick (`==`), and dotted (`-.-`)
+/// links, optional start arrows (`<`/`x`/`o`), optional end arrows
+/// (`>`/`x`/`o`), and inline middle text. The rank span follows mermaid's
+/// `destructEndLink`: dotted links span their dot count, solid/thick links span
+/// `dashes - 1` (so `-->` is 1, `--->` 2, `---->` 3, …), clamped to at least 1.
+fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, ArrowType, Option<String>, usize)> {
     let b = s.as_bytes();
     let mut i = 0;
 
@@ -499,20 +505,39 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
         }
     };
 
-    // Dotted (`-.-`, `-.->`, `-. text .->`).
-    if b.get(i) == Some(&b'-') && b.get(i + 1) == Some(&b'.') {
-        i += 2; // opening "-."
+    // Dotted link. mermaid's shaft is `-?\.+-` (leading dash optional, dots
+    // repeatable), so `-.->`, `.->`, `<.->`, and longer `-..->` all parse. The
+    // rank span is the dot count.
+    let dotted = b.get(i) == Some(&b'.')
+        || (b.get(i) == Some(&b'-') && b.get(i + 1) == Some(&b'.'));
+    if dotted {
+        if b.get(i) == Some(&b'-') {
+            i += 1; // optional leading dash
+        }
+        let dots_start = i;
+        while b.get(i) == Some(&b'.') {
+            i += 1;
+        }
+        let dots = i - dots_start; // >= 1
+        // Immediate closing dash + optional arrow: `-.->`, `.-`, `<.->`, …
         if b.get(i) == Some(&b'-') {
             i += 1; // closing dash
             let (end, j) = end_arrow(i).unwrap_or((ArrowType::None, i));
-            return Some((j, EdgeStyle::Dotted, start, end, None));
+            return Some((j, EdgeStyle::Dotted, start, end, None, dots));
         }
-        // Middle text delimited by the closing ".-".
+        // Middle text: `-. text .-> ` / `. text .->` — text up to the closing
+        // dot run, then a dash and optional arrow.
         if let Some(rel) = s[i..].find(".-") {
             let text = s[i..i + rel].trim().to_string();
-            let after = i + rel + 2;
-            let (end, j) = end_arrow(after).unwrap_or((ArrowType::None, after));
-            return Some((j, EdgeStyle::Dotted, start, end, (!text.is_empty()).then_some(text)));
+            let cd_start = i + rel;
+            let mut j = cd_start;
+            while b.get(j) == Some(&b'.') {
+                j += 1;
+            }
+            let cdots = j - cd_start; // >= 1
+            j += 1; // closing dash of ".-"
+            let (end, j2) = end_arrow(j).unwrap_or((ArrowType::None, j));
+            return Some((j2, EdgeStyle::Dotted, start, end, (!text.is_empty()).then_some(text), cdots));
         }
         return None;
     }
@@ -531,25 +556,33 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
     if i - open_start < 2 && start == ArrowType::None {
         return None; // a lone `-`/`=` is not a link
     }
+    // Rank span from the shaft's dash/equals count (mermaid: `dashes - 1`),
+    // clamped to at least 1 so a normal `-->` keeps dagre's default `minlen`.
+    let span = |dashes: usize| dashes.saturating_sub(1).max(1);
     // Immediate end arrow: `-->`, `==>`, `--x`, `<-->`, …
     if let Some((end, j)) = end_arrow(i) {
-        return Some((j, style, start, end, None));
+        return Some((j, style, start, end, None, span(i - open_start)));
     }
     // Middle text: text up to the next line run, then that run + optional arrow.
+    // Per mermaid, the edge length comes from this *closing* run (`--->`), not
+    // the opening `--` of a `-- text -->` link.
     let close = if line == b'=' { "==" } else { "--" };
     if let Some(rel) = s[i..].find(close) {
         let text = s[i..i + rel].trim().to_string();
         if !text.is_empty() {
-            let mut j = i + rel;
+            let close_start = i + rel;
+            let mut j = close_start;
             while b.get(j) == Some(&line) {
                 j += 1;
             }
             let (end, j2) = end_arrow(j).unwrap_or((ArrowType::None, j));
-            return Some((j2, style, start, end, Some(text)));
+            return Some((j2, style, start, end, Some(text), span(j - close_start)));
         }
     }
-    // Bare open link (`--`, `---`, `==`, `===`).
-    Some((i, style, start, ArrowType::None, None))
+    // Bare open link (`---`, `====`, …). With no arrowhead, mermaid's
+    // `destructEndLink` still strips one trailing char, so the shaft is one
+    // shorter than the dash run: `---` spans 1 rank, `----` 2, etc.
+    Some((i, style, start, ArrowType::None, None, (i - open_start).saturating_sub(2).max(1)))
 }
 
 /// Ensure a node parsed from `endpoint` exists in the chart, returning its
@@ -782,6 +815,31 @@ mod tests {
         assert_eq!(chart.nodes[1].shape, NodeShape::Rhombus);
         assert_eq!(chart.edges.len(), 1);
         assert_eq!(chart.edges[0].arrow_end, ArrowType::Point);
+    }
+
+    #[test]
+    fn edge_length_from_dash_count() {
+        // `-->` spans 1 rank, each extra dash/equals adds one; dotted spans its
+        // dot count; the closing run of a `-- text -->` link sets the length.
+        let chart = parse(
+            "graph TD\n C -->|L1| E1\n C -- L2 ---> E2\n C ----> E3\n C -----> E4\n C ======> E5\n C -.-> E6\n C --- E7\n C ---- E8",
+        )
+        .unwrap();
+        let lens: Vec<usize> = chart.edges.iter().map(|e| e.min_len).collect();
+        // Arrowed: `dashes - 1`. Bare (`---`, `----`): one shorter, `dashes - 2`.
+        assert_eq!(lens, vec![1, 2, 3, 4, 5, 1, 1, 2]);
+    }
+
+    #[test]
+    fn parses_dotted_links_without_leading_dash() {
+        // mermaid's dotted shaft `-?\.+-` makes the leading dash optional, so
+        // `.->` and `<.->` are edges, not node text.
+        let chart = parse("graph TD\n R1 .-> R2\n R2 <.-> C").unwrap();
+        assert_eq!(chart.nodes.len(), 3, "R1/R2/C are nodes, not phantom text");
+        assert_eq!(chart.edges.len(), 2);
+        assert!(chart.edges.iter().all(|e| e.style == EdgeStyle::Dotted));
+        assert_eq!(chart.edges[1].arrow_start, ArrowType::Point);
+        assert_eq!(chart.edges[1].arrow_end, ArrowType::Point);
     }
 
     #[test]

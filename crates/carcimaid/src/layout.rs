@@ -554,7 +554,7 @@ fn layout_scope(
             g.set_edge(
                 endpoint_key(chart, ext, e.from),
                 endpoint_key(chart, ext, e.to),
-                Some(EdgeLabel { width: lw, height: lh, ..Default::default() }),
+                Some(EdgeLabel { width: lw, height: lh, minlen: e.min_len.max(1) as i32, ..Default::default() }),
                 Some(i.to_string().as_str()),
             );
         }

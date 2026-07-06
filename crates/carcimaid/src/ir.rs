@@ -395,4 +395,8 @@ pub struct Edge {
     pub arrow_end: ArrowType,
     /// `linkStyle` CSS declarations (`k:v`) applied to this edge.
     pub link_style: Vec<String>,
+    /// Rank distance (dagre `minlen`) this edge spans, derived from the number
+    /// of dashes/dots: `-->` is 1, `--->` is 2, `---->` is 3, etc. Extra
+    /// dashes make an edge span more ranks, stretching the layout.
+    pub min_len: usize,
 }
