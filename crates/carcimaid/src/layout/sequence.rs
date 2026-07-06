@@ -4,7 +4,7 @@
 //! (loop/alt/opt/par/rect) and activations parse but do not yet contribute
 //! geometry — they will be layered on next. See `scratchpad/seq_spec.md`.
 
-use crate::ir::{SeqArrow, SeqEvent, SequenceDiagram};
+use crate::ir::{NotePlacement, SeqArrow, SeqEvent, SequenceDiagram};
 use crate::text;
 
 // --- mermaid sequence config defaults (see SequenceDiagramConfig). ---
@@ -14,6 +14,7 @@ const ACTOR_MARGIN: f64 = 50.0;
 const ACTOR_WIDTH: f64 = 150.0;
 const ACTOR_HEIGHT: f64 = 65.0;
 const BOX_MARGIN: f64 = 10.0;
+const NOTE_MARGIN: f64 = 10.0;
 const WRAP_PADDING: f64 = 10.0;
 const BOTTOM_MARGIN_ADJ: f64 = 1.0;
 /// Actor/message label font size. mermaid's CLI emits actor and message labels
@@ -38,6 +39,7 @@ pub struct LaidOutSequence {
     pub vb_h: f64,
     pub actors: Vec<PlacedActor>,
     pub messages: Vec<PlacedMessage>,
+    pub notes: Vec<PlacedNote>,
     /// Y of the top actor boxes (0) and the bottom (mirror) boxes.
     pub top_y: f64,
     pub bottom_y: f64,
@@ -63,9 +65,23 @@ impl PlacedActor {
     }
 }
 
+/// A note box attached to one or more participants.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedNote {
+    /// Event-stream index (mermaid's `data-id="i{id}"`).
+    pub id: usize,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub text: String,
+}
+
 /// A message arrow with its computed endpoints and label position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedMessage {
+    /// Event-stream index (mermaid's `data-id="i{id}"`).
+    pub id: usize,
     pub from: usize,
     pub to: usize,
     pub text: String,
@@ -96,6 +112,36 @@ fn split_lines(text: &str) -> Vec<String> {
         .split('\n')
         .map(|s| s.trim().to_string())
         .collect()
+}
+
+/// Note box `(startx, width)` from mermaid's `buildNoteModel`, by placement.
+fn note_geometry(note: &crate::ir::SeqNote, actors: &[PlacedActor]) -> (f64, f64) {
+    let text_w = label_width(&note.text, LABEL_FONT);
+    let a = &actors[note.actors[0]];
+    match note.placement {
+        NotePlacement::RightOf => {
+            let width = a.width.max(text_w + 2.0 * NOTE_MARGIN);
+            (a.x + (a.width + ACTOR_MARGIN) / 2.0, width)
+        }
+        NotePlacement::LeftOf => {
+            let width = a.width.max(text_w + 2.0 * NOTE_MARGIN);
+            (a.x - width + (a.width - ACTOR_MARGIN) / 2.0, width)
+        }
+        NotePlacement::Over if note.actors.len() >= 2 => {
+            let b = &actors[note.actors[1]];
+            let width = ((a.x + a.width / 2.0) - (b.x + b.width / 2.0)).abs() + ACTOR_MARGIN;
+            let startx = if a.x < b.x {
+                a.x + a.width / 2.0 - ACTOR_MARGIN / 2.0
+            } else {
+                b.x + b.width / 2.0 - ACTOR_MARGIN / 2.0
+            };
+            (startx, width)
+        }
+        NotePlacement::Over => {
+            let width = a.width.max(ACTOR_WIDTH).max(text_w + 2.0 * NOTE_MARGIN);
+            (a.x + (a.width - width) / 2.0, width)
+        }
+    }
 }
 
 /// `true` if this arrow paints a marker at its target (so the line is pulled
@@ -167,14 +213,33 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let max_actor_h = ACTOR_HEIGHT; // single-line labels for now
     let top_y = 0.0;
 
-    // 5. Message vertical stepping.
+    // 5. Walk the event stream in order, stepping the shared vertical cursor.
+    //    Notes and messages both advance it (blocks/activations are geometry
+    //    TBD). `eid` is the event-stream index = mermaid's `data-id`.
     let mut cursor = max_actor_h; // bumpVerticalPos(maxHeight) after actors
     let mut messages = Vec::new();
+    let mut notes = Vec::new();
     // autonumber state: Some((next_index, step)) when active.
     let mut autonum: Option<(i64, i64)> = None;
-    for ev in &d.events {
+    for (eid, ev) in d.events.iter().enumerate() {
         match ev {
             SeqEvent::Autonumber(v) => autonum = *v,
+            SeqEvent::Note(note) => {
+                cursor += BOX_MARGIN; // bumpVerticalPos(boxMargin)
+                let starty = cursor;
+                let (nx, nw) = note_geometry(note, &actors);
+                let lines = split_lines(&note.text).len().max(1) as f64;
+                let height = lines * SEQ_LINE_HEIGHT + 2.0 * NOTE_MARGIN;
+                cursor += height;
+                notes.push(PlacedNote {
+                    id: eid,
+                    x: nx,
+                    y: starty,
+                    width: nw,
+                    height,
+                    text: note.text.clone(),
+                });
+            }
             SeqEvent::Message(m) => {
                 let lines = split_lines(&m.text).len().max(1) as f64;
                 let text_h = lines * SEQ_LINE_HEIGHT;
@@ -204,6 +269,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 }
 
                 messages.push(PlacedMessage {
+                    id: eid,
                     from: m.from,
                     to: m.to,
                     text: m.text.clone(),
@@ -225,12 +291,16 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let bottom_y = cursor;
     cursor += max_actor_h + BOX_MARGIN;
 
-    // 7. Content bounding box.
-    let box_startx = actors.iter().map(|a| a.x).fold(0.0_f64, f64::min);
-    let box_stopx = actors
+    // 7. Content bounding box (actors + note extents; notes can overhang).
+    let mut box_startx = actors.iter().map(|a| a.x).fold(0.0_f64, f64::min);
+    let mut box_stopx = actors
         .iter()
         .map(|a| a.x + a.width)
         .fold(0.0_f64, f64::max);
+    for note in &notes {
+        box_startx = box_startx.min(note.x);
+        box_stopx = box_stopx.max(note.x + note.width);
+    }
     let box_starty = top_y;
     let box_stopy = cursor;
 
@@ -250,6 +320,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         vb_h: height + extra_title,
         actors,
         messages,
+        notes,
         top_y,
         bottom_y,
         actor_height: max_actor_h,

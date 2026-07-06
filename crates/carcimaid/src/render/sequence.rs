@@ -72,9 +72,13 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     out.push_str(seq_defs::SYMBOL_DEFS);
     out.push_str(seq_defs::MARKER_DEFS);
 
-    // 7. Messages: text then line (+ optional autonumber circle/number).
-    for (idx, m) in s.messages.iter().enumerate() {
-        message(&mut out, idx, m, &s.actors);
+    // 7. Notes (all notes precede all messages in mermaid's DOM), then
+    //    messages: text then line (+ optional autonumber circle/number).
+    for note in &s.notes {
+        note_box(&mut out, note);
+    }
+    for m in &s.messages {
+        message(&mut out, m, &s.actors);
     }
 
     // 8. Title.
@@ -138,8 +142,40 @@ fn actor_box(
     }
 }
 
+/// Emit a note: `<g data-et="note">` wrapping a `note` rect + `noteText`.
+fn note_box(out: &mut String, note: &crate::layout::sequence::PlacedNote) {
+    let cx = note.x + note.width / 2.0;
+    let _ = write!(
+        out,
+        r#"<g data-et="note" data-id="i{id}">"#,
+        id = note.id,
+    );
+    let _ = write!(
+        out,
+        concat!(
+            r##"<rect x="{x}" y="{y}" fill="#EDF2AE" stroke="#666" width="{w}" height="{h}" "##,
+            r#"class="note"/>"#,
+        ),
+        x = n(note.x),
+        y = n(note.y),
+        w = n(note.width),
+        h = n(note.height),
+    );
+    let _ = write!(
+        out,
+        concat!(
+            r#"<text x="{cx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" "#,
+            r#"alignment-baseline="middle" class="noteText" dy="1em" "#,
+            r#"style="font-size: 16px; font-weight: 400;"><tspan x="{cx}">{t}</tspan></text></g>"#,
+        ),
+        cx = n(cx),
+        ty = n(note.y + 5.0),
+        t = esc(&note.text),
+    );
+}
+
 /// Emit one message: label `<text>`, arrow `<line>`, and autonumber elements.
-fn message(out: &mut String, idx: usize, m: &PlacedMessage, actors: &[crate::layout::sequence::PlacedActor]) {
+fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequence::PlacedActor]) {
     let (lo, hi) = (m.start_x.min(m.stop_x), m.start_x.max(m.stop_x));
     let text_x = (lo + (hi - lo) / 2.0).round();
     let _ = write!(
@@ -182,7 +218,7 @@ fn message(out: &mut String, idx: usize, m: &PlacedMessage, actors: &[crate::lay
         x2 = n(m.stop_x),
         y = n(m.line_y),
         class = class,
-        idx = idx,
+        idx = m.id,
         from = esc(&actors[m.from].id),
         to = esc(&actors[m.to].id),
         me = marker_end,
