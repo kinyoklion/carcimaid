@@ -1,11 +1,12 @@
 ---
-title: Merge from main onto undeveloped branch (top-to-bottom)
+title: Cherry-pick from main (top-to-bottom)
 ---
 gitGraph TB:
 commit
 branch develop
 commit
 checkout main
-commit
+commit id:"A"
 checkout develop
-merge main
+commit
+cherry-pick id: "A"

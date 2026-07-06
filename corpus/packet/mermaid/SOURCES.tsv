@@ -1,5 +1,8 @@
 file	source	block
 demo-packet_000.mmd	demos/packet.html	0
+demo-packet_001.mmd	demos/packet.html	1
+demo-packet_002.mmd	demos/packet.html	2
+demo-packet_003.mmd	demos/packet.html	3
 packet_000.mmd	cypress/integration/rendering/packet/packet.spec.ts	0
 packet_001.mmd	cypress/integration/rendering/packet/packet.spec.ts	1
 packet_002.mmd	cypress/integration/rendering/packet/packet.spec.ts	2

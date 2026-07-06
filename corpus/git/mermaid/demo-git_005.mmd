@@ -1,11 +1,14 @@
 ---
-title: Merge feature to advanced main (top-to-bottom)
+title: Continuous development (bottom-to-top)
 ---
-gitGraph TB:
+gitGraph BT:
 commit
-branch newbranch
-checkout newbranch
+branch develop
+checkout develop
 commit
 checkout main
+merge develop
+checkout develop
 commit
-merge newbranch
+checkout main
+merge develop

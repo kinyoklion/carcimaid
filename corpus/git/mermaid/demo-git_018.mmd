@@ -1,12 +1,15 @@
 ---
-title: Merge from main onto developed branch (top-to-bottom)
+title: Cherry-pick then merge (left-to-right)
 ---
-gitGraph TB:
+gitGraph LR:
 commit
-branch develop
-commit
+branch newbranch
+checkout newbranch
+commit id: "Pick me"
 checkout main
 commit
-checkout develop
+checkout newbranch
 commit
-merge main
+checkout main
+cherry-pick id: "Pick me"
+merge newbranch

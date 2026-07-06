@@ -1,28 +1,10 @@
-  ---
-  title: Simple "branch and merge" (bottom-to-top)
-  ---
-  gitGraph BT:
-  commit
-  branch newbranch
-  checkout newbranch
-  commit
-  checkout main
-  merge newbranch
-  </pre
->
-<h2>Continuous development graph</h2>
-<pre class="mermaid">
 ---
-title: Continuous development (left-to-right)
+title: Simple "branch and merge" (bottom-to-top)
 ---
-gitGraph LR:
+gitGraph BT:
 commit
-branch develop
-checkout develop
+branch newbranch
+checkout newbranch
 commit
 checkout main
-merge develop
-checkout develop
-commit
-checkout main
-merge develop
+merge newbranch

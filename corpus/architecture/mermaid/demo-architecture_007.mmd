@@ -5,12 +5,12 @@ architecture-beta
   service servT(server)[Server 4]
   service servB(server)[Server 5]
 
-  servC:L -[Label that is Long]- R:servL
-  servC:R -[Label that is Long]- L:servR
-  servC:T -[Label that is Long]- B:servT
-  servC:B -[Label that is Long]- T:servB
+  servC:L -[Label]- R:servL
+  servC:R -[Label]- L:servR
+  servC:T -[Label]- B:servT
+  servC:B -[Label]- T:servB
 
-  servL:T -[Label that is Long]- L:servT
-  servL:B -[Label that is Long]- L:servB
-  servR:T -[Label that is Long]- R:servT
-  servR:B -[Label that is Long]- R:servB
+  servL:T -[Label]- L:servT
+  servL:B -[Label]- L:servB
+  servR:T -[Label]- R:servT
+  servR:B -[Label]- R:servB

@@ -1,12 +1,14 @@
 ---
-title: Cherry-pick from main (top-to-bottom)
+title: Cherry-pick from branch (left-to-right)
 ---
-gitGraph TB:
+gitGraph LR:
 commit
-branch develop
+branch newbranch
+checkout newbranch
+commit id: "Pick me"
+checkout main
+commit
+checkout newbranch
 commit
 checkout main
-commit id:"A"
-checkout develop
-commit
-cherry-pick id: "A"
+cherry-pick id: "Pick me"

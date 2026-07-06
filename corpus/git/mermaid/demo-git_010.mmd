@@ -1,14 +1,16 @@
 ---
-title: Cherry-pick from branch (bottom-to-top)
+title: Two-way merges (top-to-bottom)
 ---
-gitGraph BT:
+gitGraph TB:
 commit
-branch newbranch
-checkout newbranch
-commit id: "Pick me"
-checkout main
-commit
-checkout newbranch
+branch develop
+checkout develop
 commit
 checkout main
-cherry-pick id: "Pick me"
+merge develop
+commit
+checkout develop
+merge main
+commit
+checkout main
+merge develop

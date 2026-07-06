@@ -1,14 +1,15 @@
 ---
-title: Two branches from same commit (top-to-bottom)
+title: Cherry-pick then merge (bottom-to-top)
 ---
-gitGraph TB:
+gitGraph BT:
 commit
+branch newbranch
+checkout newbranch
+commit id: "Pick me"
+checkout main
 commit
-branch feature-001
-commit
+checkout newbranch
 commit
 checkout main
-branch feature-002
-commit
-checkout feature-001
-merge feature-002
+cherry-pick id: "Pick me"
+merge newbranch

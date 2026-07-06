@@ -1,34 +1,11 @@
-  ---
-  title: Two-way merges (bottom-to-top)
-  ---
-  gitGraph BT:
-  commit
-  branch develop
-  checkout develop
-  commit
-  checkout main
-  merge develop
-  commit
-  checkout develop
-  merge main
-  commit
-  checkout main
-  merge develop
-  </pre
->
-<h2>Cherry-pick from branch graph</h2>
-<pre class="mermaid">
 ---
-title: Cherry-pick from branch (left-to-right)
+title: Merge feature to advanced main (bottom-to-top)
 ---
-gitGraph LR:
+gitGraph BT:
 commit
 branch newbranch
 checkout newbranch
-commit id: "Pick me"
-checkout main
-commit
-checkout newbranch
 commit
 checkout main
-cherry-pick id: "Pick me"
+commit
+merge newbranch

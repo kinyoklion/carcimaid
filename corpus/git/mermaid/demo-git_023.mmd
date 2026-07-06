@@ -1,22 +1,11 @@
 ---
-title: Three branches and a cherry-pick from each (bottom-to-top)
+title: Merge from main onto undeveloped branch (bottom-to-top)
 ---
 gitGraph BT:
-commit id: "ZERO"
+commit
 branch develop
-commit id:"A"
+commit
 checkout main
-commit id:"ONE"
+commit
 checkout develop
-commit id:"B"
-branch featureA
-commit id:"FIX"
-commit id: "FIX-2"
-checkout main
-commit id:"TWO"
-cherry-pick id:"A"
-commit id:"THREE"
-cherry-pick id:"FIX"
-checkout develop
-commit id:"C"
-merge featureA
+merge main

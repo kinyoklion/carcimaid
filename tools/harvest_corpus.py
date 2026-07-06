@@ -128,8 +128,11 @@ def extract_backticks(src: str):
 
 def extract_html(src: str):
     """Yield diagram text from <pre/div class="mermaid"> blocks."""
+    # Some demos format the closing tag with whitespace before `>`
+    # (`</pre\n  >`), so allow `\s*` there — otherwise a diagram's block runs on
+    # to a later `</pre>` and swallows several diagrams (plus stray tags).
     for m in re.finditer(
-        r'<(?:pre|div)[^>]*class="[^"]*mermaid[^"]*"[^>]*>(.*?)</(?:pre|div)>',
+        r'<(?:pre|div)[^>]*class="[^"]*mermaid[^"]*"[^>]*>(.*?)</(?:pre|div)\s*>',
         src,
         re.S,
     ):

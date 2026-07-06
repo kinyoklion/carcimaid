@@ -1,29 +1,14 @@
-  ---
-  title: Continuous development (bottom-to-top)
-  ---
-  gitGraph BT:
-  commit
-  branch develop
-  checkout develop
-  commit
-  checkout main
-  merge develop
-  checkout develop
-  commit
-  checkout main
-  merge develop
-  </pre
->
-<h2>Merge feature to advanced main graph</h2>
-<pre class="mermaid">
 ---
-title: Merge feature to advanced main (left-to-right)
+title: Continuous development (top-to-bottom)
 ---
-gitGraph LR:
+gitGraph TB:
 commit
-branch newbranch
-checkout newbranch
+branch develop
+checkout develop
 commit
 checkout main
+merge develop
+checkout develop
 commit
-merge newbranch
+checkout main
+merge develop

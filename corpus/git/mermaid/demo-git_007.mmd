@@ -1,16 +1,11 @@
 ---
-title: Two-way merges (top-to-bottom)
+title: Merge feature to advanced main (top-to-bottom)
 ---
 gitGraph TB:
 commit
-branch develop
-checkout develop
+branch newbranch
+checkout newbranch
 commit
 checkout main
-merge develop
 commit
-checkout develop
-merge main
-commit
-checkout main
-merge develop
+merge newbranch

@@ -5,9 +5,10 @@ demo-sequence_002.mmd	demos/sequence.html	2
 demo-sequence_003.mmd	demos/sequence.html	3
 demo-sequence_004.mmd	demos/sequence.html	4
 demo-sequence_005.mmd	demos/sequence.html	5
-demo-sequence_006.mmd	demos/sequence.html	6
 demo-sequence_007.mmd	demos/sequence.html	7
+demo-sequence_008.mmd	demos/sequence.html	8
 demo-sequence_009.mmd	demos/sequence.html	9
+demo-sequence_011.mmd	demos/sequence.html	11
 sequenceDiagram-redux-themes_000.mmd	cypress/integration/rendering/sequence/sequenceDiagram-redux-themes.spec.ts	0
 sequenceDiagram-redux-themes_001.mmd	cypress/integration/rendering/sequence/sequenceDiagram-redux-themes.spec.ts	1
 sequenceDiagram-redux-themes_002.mmd	cypress/integration/rendering/sequence/sequenceDiagram-redux-themes.spec.ts	2
