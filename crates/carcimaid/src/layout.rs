@@ -14,14 +14,13 @@ use dagre::graph::{Graph, GraphOptions};
 use dagre::layout::types::{EdgeLabel, LayoutOptions, NodeLabel, RankDir};
 use dagre::layout::layout as dagre_layout;
 
+pub mod sequence;
+
 /// A laid-out diagram: geometry plus enough of the model to render.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LaidOut {
     Flowchart(LaidOutFlowchart),
-    /// A sequence diagram. Geometry assignment is still being built out
-    /// (task #19); for now the parsed model is carried through so the renderer
-    /// can compute placement inline.
-    Sequence(crate::ir::SequenceDiagram),
+    Sequence(sequence::LaidOutSequence),
 }
 
 /// A flowchart with concrete geometry.
@@ -149,7 +148,7 @@ const MARGIN: f64 = 8.0;
 pub fn layout(diagram: &Diagram) -> Result<LaidOut> {
     match diagram {
         Diagram::Flowchart(f) => Ok(LaidOut::Flowchart(layout_flowchart(f))),
-        Diagram::Sequence(s) => Ok(LaidOut::Sequence(s.clone())),
+        Diagram::Sequence(s) => Ok(LaidOut::Sequence(sequence::layout(s))),
     }
 }
 
