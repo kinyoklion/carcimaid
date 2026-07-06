@@ -14,10 +14,35 @@ use std::process::Command;
 /// false` makes the root `<svg>` carry numeric `width`/`height` instead of
 /// `100%`, which the structural comparator can diff numerically. Both choices
 /// are mirrored by carcimaid's renderer so the two outputs are comparable.
+///
+/// `useMaxWidth` is a per-diagram config key (each type extends mermaid's
+/// `BaseDiagramConfig`), so it is set for every diagram type in the corpus —
+/// mermaid merges config leniently, so keys for types that ignore it are
+/// harmless. `htmlLabels: false` is set for the label-bearing graph types.
 const MERMAID_CONFIG: &str = r#"{
   "htmlLabels": false,
+  "securityLevel": "loose",
   "flowchart": { "htmlLabels": false, "useMaxWidth": false },
-  "securityLevel": "loose"
+  "sequence": { "useMaxWidth": false },
+  "class": { "htmlLabels": false, "useMaxWidth": false },
+  "state": { "htmlLabels": false, "useMaxWidth": false },
+  "er": { "useMaxWidth": false },
+  "gantt": { "useMaxWidth": false },
+  "journey": { "useMaxWidth": false },
+  "timeline": { "useMaxWidth": false },
+  "pie": { "useMaxWidth": false },
+  "quadrantChart": { "useMaxWidth": false },
+  "xyChart": { "useMaxWidth": false },
+  "requirement": { "useMaxWidth": false },
+  "architecture": { "useMaxWidth": false },
+  "mindmap": { "useMaxWidth": false },
+  "kanban": { "useMaxWidth": false },
+  "gitGraph": { "useMaxWidth": false },
+  "c4": { "useMaxWidth": false },
+  "sankey": { "useMaxWidth": false },
+  "packet": { "useMaxWidth": false },
+  "block": { "useMaxWidth": false },
+  "radar": { "useMaxWidth": false }
 }"#;
 
 /// Configuration for invoking the oracle.
