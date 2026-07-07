@@ -67,6 +67,16 @@ pub struct PlacedActor {
     /// Left edge of the actor box.
     pub x: f64,
     pub width: f64,
+    /// Top-box y. `top_y` normally; for a `create`d actor, the y of the message
+    /// that introduces it (box centred on that line).
+    pub starty: f64,
+    /// Lifeline end y. `bottom_y` normally; for a `destroy`ed actor, the y of
+    /// the message that destroys it (marked with an X, no footer box).
+    pub stopy: f64,
+    /// `create`d mid-diagram (no top box at `top_y`).
+    pub created: bool,
+    /// `destroy`ed (lifeline ends at `stopy` with an X; no footer box).
+    pub destroyed: bool,
 }
 
 impl PlacedActor {
@@ -471,6 +481,14 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let mut box_x = vec![0.0_f64; nb];
     let mut box_right = vec![0.0_f64; nb];
     let mut box_seen = vec![false; nb];
+    // Created participants get +width/2 extra left margin (room for the
+    // introducing arrow); pre-scan the events for `create`.
+    let mut is_created = vec![false; n];
+    for ev in &d.events {
+        if let SeqEvent::Create(a) = ev {
+            is_created[*a] = true;
+        }
+    }
     let (mut prev_width, mut prev_margin) = (0.0_f64, 0.0_f64);
     let mut prev_box: Option<usize> = None;
     for i in 0..n {
@@ -489,6 +507,9 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 prev_margin += box_margin[b];
             }
         }
+        if is_created[i] {
+            prev_margin += widths[i] / 2.0;
+        }
         xs[i] = prev_width + prev_margin;
         prev_width += widths[i] + prev_margin;
         if let Some(b) = bx {
@@ -498,7 +519,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         prev_box = bx;
     }
 
-    let actors: Vec<PlacedActor> = d
+    let mut actors: Vec<PlacedActor> = d
         .participants
         .iter()
         .enumerate()
@@ -508,6 +529,10 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
             is_actor: p.is_actor,
             x: xs[i],
             width: widths[i],
+            starty: 0.0, // set to top_y below
+            stopy: 0.0,  // set to bottom_y after the walk
+            created: false,
+            destroyed: false,
         })
         .collect();
 
@@ -517,6 +542,9 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let has_boxes = box_seen.iter().any(|&s| s);
     let box_label_h = SEQ_LINE_HEIGHT; // single-line box names
     let top_y = if has_boxes { BOX_MARGIN + box_label_h } else { 0.0 };
+    for a in &mut actors {
+        a.starty = top_y;
+    }
 
     // 5. Walk the event stream in order, stepping the shared vertical cursor.
     //    `sid` is the event-stream index used for `data-id`. mermaid inserts a
@@ -530,12 +558,24 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let mut open: Vec<OpenBlock> = Vec::new();
     let mut acts = ActivationState::default();
     let mut autonum: Option<(i64, i64)> = None;
+    // Participants awaiting their introducing/destroying message.
+    let mut pending_create: Vec<usize> = Vec::new();
+    let mut pending_destroy: Vec<usize> = Vec::new();
     let mut sid = 0usize;
     for ev in &d.events {
         let eid = sid;
-        sid += 1;
+        // `create`/`destroy` don't push a message, so they don't consume a
+        // stream id (unlike autonumber/activate, which mermaid records).
+        if !matches!(ev, SeqEvent::Create(_) | SeqEvent::Destroy(_)) {
+            sid += 1;
+        }
         match ev {
             SeqEvent::Autonumber(v) => autonum = *v,
+            SeqEvent::Create(a) => {
+                actors[*a].created = true;
+                pending_create.push(*a);
+            }
+            SeqEvent::Destroy(a) => pending_destroy.push(*a),
             SeqEvent::Activate(a) => acts.start(*a, &actors, cursor, eid),
             SeqEvent::Deactivate(a) => acts.end(*a, cursor),
             SeqEvent::Block(b) => handle_block(
@@ -586,7 +626,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 // no-activation case): near edge of source, far edge of target.
                 let (fl, fr) = acts.bounds(m.from, &actors);
                 let (tl, tr) = acts.bounds(m.to, &actors);
-                let (start_x, stop_x, exp_lo, exp_hi);
+                let (mut start_x, mut stop_x, exp_lo, exp_hi);
                 if self_loop {
                     // Self-message: a cubic loop bulging right to cx+61. The
                     // cursor advances 30 past the line (for the loop's height).
@@ -611,6 +651,34 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     exp_lo = fl.min(tl);
                     exp_hi = fr.max(tr);
                     cursor = line_y;
+                }
+
+                // create/destroy: the introducing/destroying message centres the
+                // actor's box/endpoint on this line and bumps the cursor by half
+                // an actor height. `adj` pulls the arrow to the box edge.
+                let half_h = max_actor_h / 2.0;
+                // create adds +3 to the pull-back; destroy does not.
+                let half_w = |a: &PlacedActor| if a.is_actor { 18.0 } else { a.width / 2.0 };
+                if let Some(pos) = pending_create.iter().position(|&x| x == m.to) {
+                    pending_create.remove(pos);
+                    actors[m.to].starty = line_y - half_h;
+                    let a = half_w(&actors[m.to]) + 3.0;
+                    stop_x += if actors[m.to].x < actors[m.from].x { a } else { -a };
+                    cursor = line_y + half_h;
+                } else if let Some(pos) = pending_destroy.iter().position(|&x| x == m.from) {
+                    pending_destroy.remove(pos);
+                    actors[m.from].stopy = line_y - half_h;
+                    actors[m.from].destroyed = true;
+                    let a = half_w(&actors[m.from]);
+                    start_x += if actors[m.from].x < actors[m.to].x { a } else { -a };
+                    cursor = line_y + half_h;
+                } else if let Some(pos) = pending_destroy.iter().position(|&x| x == m.to) {
+                    pending_destroy.remove(pos);
+                    actors[m.to].stopy = line_y - half_h;
+                    actors[m.to].destroyed = true;
+                    let a = half_w(&actors[m.to]);
+                    stop_x += if actors[m.to].x < actors[m.from].x { a } else { -a };
+                    cursor = line_y + half_h;
                 }
 
                 // A `-` suffix ends the source's bar at this line.
@@ -649,6 +717,13 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     cursor += BOX_MARGIN * 2.0;
     let bottom_y = cursor;
     cursor += max_actor_h + BOX_MARGIN;
+    // Non-destroyed lifelines run to the bottom mirror boxes; destroyed ones
+    // already have their (earlier) stopy.
+    for a in &mut actors {
+        if !a.destroyed {
+            a.stopy = bottom_y;
+        }
+    }
 
     // 6c. Participant boxes span the full content height. Padding = boxMargin*2.
     let boxes: Vec<PlacedBox> = d

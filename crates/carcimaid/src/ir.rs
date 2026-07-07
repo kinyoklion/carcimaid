@@ -471,6 +471,12 @@ pub enum SeqEvent {
     Block(BlockBoundary),
     /// `autonumber [start [step]]` / `autonumber off` — toggles numbering.
     Autonumber(Option<(i64, i64)>),
+    /// `create [participant|actor] X` — the participant's box appears at the
+    /// next message rather than the top.
+    Create(usize),
+    /// `destroy X` — the participant's lifeline ends (with an X) at the next
+    /// message referencing it.
+    Destroy(usize),
 }
 
 /// A message (arrow) between two participants.

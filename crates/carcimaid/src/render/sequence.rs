@@ -33,8 +33,10 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     );
 
     // Lifeline start y differs for actor-type (glyph, +80) vs box (+65).
+    // Lifeline runs from the bottom of the (possibly created-and-lowered) top
+    // box to the actor's stopy (bottom, or the destroy point).
     let lifeline_y1 = |a: &crate::layout::sequence::PlacedActor| {
-        s.top_y + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
+        a.starty + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
     };
 
     // 0a. Participant `box` groupings (drawn behind everything, lowered to front).
@@ -86,10 +88,12 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     //    `<g>` with rect+label; an actor footer's *lowered* part is an empty
     //    `<g>` (its glyph is emitted later, after the defs).
     for a in s.actors.iter().rev() {
+        // A destroyed actor's footer sits at its destroy point, not the bottom.
+        let fy = if a.destroyed { a.stopy } else { s.bottom_y };
         if a.is_actor {
             out.push_str("<g></g>");
         } else {
-            actor_box(&mut out, a.cx(), a.x, s.bottom_y, a.width, s.actor_height, &a.label, &a.id, false);
+            actor_box(&mut out, a.cx(), a.x, fy, a.width, s.actor_height, &a.label, &a.id, false);
         }
     }
     // 2. Top actors with lifelines, reverse participant order (id carries the
@@ -108,7 +112,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
             i = i,
             cx = n(cx),
             y1 = n(lifeline_y1(a)),
-            y2 = n(s.bottom_y),
+            y2 = n(a.stopy),
             name = esc(&a.id),
         );
         if !a.is_actor {
@@ -118,7 +122,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
                 i = i,
                 id = esc(&a.id),
             );
-            actor_box(&mut out, cx, a.x, s.top_y, a.width, s.actor_height, &a.label, &a.id, true);
+            actor_box(&mut out, cx, a.x, a.starty, a.width, s.actor_height, &a.label, &a.id, true);
             out.push_str("</g>");
         }
         out.push_str("</g>");
@@ -138,7 +142,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     //     last actor index (n-1) for every bottom glyph (mermaid freezes its
     //     `actorCnt` during the footer pass).
     for (i, a) in s.actors.iter().enumerate().filter(|(_, a)| a.is_actor) {
-        actor_glyph(&mut out, a.cx(), s.top_y, &a.label, &a.id, true, i);
+        actor_glyph(&mut out, a.cx(), a.starty, &a.label, &a.id, true, i);
     }
 
     // 7. Notes and control-structure boxes, in event order (both precede all
@@ -163,7 +167,8 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     // their torso/arms id index is frozen at the last actor index.
     let last = s.actors.len().saturating_sub(1);
     for a in s.actors.iter().filter(|a| a.is_actor) {
-        actor_glyph(&mut out, a.cx(), s.bottom_y, &a.label, &a.id, false, last);
+        let fy = if a.destroyed { a.stopy } else { s.bottom_y };
+        actor_glyph(&mut out, a.cx(), fy, &a.label, &a.id, false, last);
     }
 
     // 8. Title.

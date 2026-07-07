@@ -102,17 +102,21 @@ fn parse_statement(stmt: &str, d: &mut SequenceDiagram, cur_box: &mut Option<usi
     }
     if let Some(rest) = keyword(stmt, "create") {
         // `create participant X` / `create actor X` / `create X`
-        if let Some(r) = keyword(rest, "participant") {
-            declare_participant(r, false, d, *cur_box);
+        let idx = if let Some(r) = keyword(rest, "participant") {
+            declare_participant(r, false, d, *cur_box)
         } else if let Some(r) = keyword(rest, "actor") {
-            declare_participant(r, true, d, *cur_box);
+            declare_participant(r, true, d, *cur_box)
         } else {
-            declare_participant(rest, false, d, *cur_box);
+            declare_participant(rest, false, d, *cur_box)
+        };
+        if let Some(i) = idx {
+            d.events.push(SeqEvent::Create(i));
         }
         return;
     }
     if let Some(rest) = keyword(stmt, "destroy") {
-        ensure_participant(rest.trim(), false, d);
+        let i = ensure_participant(rest.trim(), false, d);
+        d.events.push(SeqEvent::Destroy(i));
         return;
     }
     // activation
@@ -197,8 +201,14 @@ fn parse_block_boundary(stmt: &str, _d: &mut SequenceDiagram) -> Option<BlockBou
 }
 
 /// Parse a `participant`/`actor` declaration body: `X` or `X as Alias`.
-/// `box_idx` is the enclosing `box` grouping, if any.
-fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram, box_idx: Option<usize>) {
+/// `box_idx` is the enclosing `box` grouping, if any. Returns the participant
+/// index (or `None` for an empty body).
+fn declare_participant(
+    body: &str,
+    is_actor: bool,
+    d: &mut SequenceDiagram,
+    box_idx: Option<usize>,
+) -> Option<usize> {
     let body = body.trim();
     // Strip a trailing `@{ ... }` metadata block (participant shapes).
     let body = body.split('@').next().unwrap_or(body).trim();
@@ -207,7 +217,7 @@ fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram, box_
         None => (body.to_string(), body.to_string()),
     };
     if id.is_empty() {
-        return;
+        return None;
     }
     match d.participant_index(&id) {
         Some(i) => {
@@ -217,8 +227,12 @@ fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram, box_
             if box_idx.is_some() {
                 d.participants[i].box_idx = box_idx;
             }
+            Some(i)
         }
-        None => d.participants.push(Participant { id, label, is_actor, box_idx }),
+        None => {
+            d.participants.push(Participant { id, label, is_actor, box_idx });
+            Some(d.participants.len() - 1)
+        }
     }
 }
 
