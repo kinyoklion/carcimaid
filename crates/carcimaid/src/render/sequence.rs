@@ -71,8 +71,10 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         let _ = write!(out, "</g>");
     }
 
-    // 0b. Coloured `rect` background regions (behind everything).
-    for r in &s.rects {
+    // 0b. Coloured `rect` background regions (behind everything). Emitted in
+    //     reverse close-order so an inner (later-listed) nested rect draws on
+    //     top of its enclosing rect (mermaid lowers each, reversing the order).
+    for r in s.rects.iter().rev() {
         let _ = write!(
             out,
             r#"<rect x="{x}" y="{y}" fill="{f}" width="{w}" height="{h}" class="rect"/>"#,
