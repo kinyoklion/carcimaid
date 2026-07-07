@@ -77,11 +77,13 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     let mut pre: Vec<(usize, PreElem)> = Vec::new();
     pre.extend(s.notes.iter().map(|nt| (nt.id, PreElem::Note(nt))));
     pre.extend(s.blocks.iter().map(|b| (b.id, PreElem::Block(b))));
+    pre.extend(s.activations.iter().map(|a| (a.order, PreElem::Activation(a))));
     pre.sort_by_key(|(id, _)| *id);
     for (_, el) in &pre {
         match el {
             PreElem::Note(nt) => note_box(&mut out, nt),
             PreElem::Block(b) => block_box(&mut out, b),
+            PreElem::Activation(a) => activation_bar(&mut out, a),
         }
     }
     for m in &s.messages {
@@ -154,6 +156,23 @@ fn actor_box(
 enum PreElem<'a> {
     Note(&'a crate::layout::sequence::PlacedNote),
     Block(&'a crate::layout::sequence::PlacedBlock),
+    Activation(&'a crate::layout::sequence::PlacedActivation),
+}
+
+/// Emit an activation bar: `<g><rect class="activationN"/></g>`.
+fn activation_bar(out: &mut String, a: &crate::layout::sequence::PlacedActivation) {
+    let _ = write!(
+        out,
+        concat!(
+            r##"<g><rect x="{x}" y="{y}" fill="#EDF2AE" stroke="#666" width="{w}" height="{h}" "##,
+            r#"class="activation{c}"/></g>"#,
+        ),
+        x = n(a.x),
+        y = n(a.y),
+        w = n(a.w),
+        h = n(a.h),
+        c = a.class_idx,
+    );
 }
 
 /// Emit a control-structure box: 4 `loopLine`s, section dividers, the corner

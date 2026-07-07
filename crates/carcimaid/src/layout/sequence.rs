@@ -19,6 +19,7 @@ const NOTE_MARGIN: f64 = 10.0;
 const WRAP_PADDING: f64 = 10.0;
 const BOTTOM_MARGIN_ADJ: f64 = 1.0;
 const LABEL_BOX_HEIGHT: f64 = 20.0;
+const ACTIVATION_WIDTH: f64 = 10.0;
 /// Actor/message label font size. mermaid's CLI emits actor and message labels
 /// at 16px (the schema's 14 is overridden at runtime); both are calibrated to
 /// the oracle here.
@@ -44,6 +45,8 @@ pub struct LaidOutSequence {
     pub notes: Vec<PlacedNote>,
     /// Control-structure boxes (loop/alt/opt/par), in event order.
     pub blocks: Vec<PlacedBlock>,
+    /// Activation bars.
+    pub activations: Vec<PlacedActivation>,
     /// Y of the top actor boxes (0) and the bottom (mirror) boxes.
     pub top_y: f64,
     pub bottom_y: f64,
@@ -66,6 +69,81 @@ impl PlacedActor {
     /// Lifeline / box centre x.
     pub fn cx(&self) -> f64 {
         self.x + self.width / 2.0
+    }
+}
+
+/// An activation bar on a participant's lifeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedActivation {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// `class="activation{class_idx}"` (0/1/2, cycling by remaining stack depth).
+    pub class_idx: usize,
+    /// Stream id of the opening event (for document ordering).
+    pub order: usize,
+}
+
+/// Tracks the activation-bar stack while walking the event stream.
+#[derive(Default)]
+struct ActivationState {
+    stack: Vec<ActiveBar>,
+    done: Vec<PlacedActivation>,
+}
+
+struct ActiveBar {
+    actor: usize,
+    startx: f64,
+    stopx: f64,
+    starty: f64,
+    order: usize,
+}
+
+impl ActivationState {
+    fn count(&self, actor: usize) -> usize {
+        self.stack.iter().filter(|b| b.actor == actor).count()
+    }
+    /// Open a bar on `actor` at `starty`. Stacked bars step right by half the
+    /// activation width (mermaid's `newActivation`).
+    fn start(&mut self, actor: usize, actors: &[PlacedActor], starty: f64, order: usize) {
+        let stacked = self.count(actor) as f64;
+        let cx = actors[actor].cx();
+        let x = cx + (stacked - 1.0) * ACTIVATION_WIDTH / 2.0;
+        self.stack.push(ActiveBar { actor, startx: x, stopx: x + ACTIVATION_WIDTH, starty, order });
+    }
+    /// Close the most recent bar on `actor` at `cursor`, emitting the rect.
+    fn end(&mut self, actor: usize, cursor: f64) {
+        let Some(pos) = self.stack.iter().rposition(|b| b.actor == actor) else { return };
+        let bar = self.stack.remove(pos);
+        let remaining = self.count(actor);
+        let (mut y, mut stopy) = (bar.starty, cursor);
+        // Very short activations are nudged so the bar stays visible.
+        if y + 18.0 > cursor {
+            y = cursor - 6.0;
+            stopy = cursor + 12.0;
+        }
+        self.done.push(PlacedActivation {
+            x: bar.startx,
+            y,
+            w: ACTIVATION_WIDTH,
+            h: stopy - y,
+            class_idx: remaining % 3,
+            order: bar.order,
+        });
+    }
+    /// `[left, right]` bounds of `actor` — `cx ± 1` widened by any open bars.
+    fn bounds(&self, actor: usize, actors: &[PlacedActor]) -> (f64, f64) {
+        let cx = actors[actor].cx();
+        let (mut l, mut r) = (cx - 1.0, cx + 1.0);
+        for b in self.stack.iter().filter(|b| b.actor == actor) {
+            l = l.min(b.startx);
+            r = r.max(b.stopx);
+        }
+        (l, r)
+    }
+    fn finish(self) -> Vec<PlacedActivation> {
+        self.done
     }
 }
 
@@ -362,18 +440,24 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let top_y = 0.0;
 
     // 5. Walk the event stream in order, stepping the shared vertical cursor.
-    //    Notes and messages both advance it (blocks/activations are geometry
-    //    TBD). `eid` is the event-stream index = mermaid's `data-id`.
+    //    `sid` is the event-stream index used for `data-id`. mermaid inserts a
+    //    phantom activeStart/End message for a `+`/`-` suffix, so `sid` skips an
+    //    extra slot for those (keeping later ids aligned).
     let mut cursor = max_actor_h; // bumpVerticalPos(maxHeight) after actors
     let mut messages = Vec::new();
     let mut notes = Vec::new();
     let mut blocks: Vec<PlacedBlock> = Vec::new();
     let mut open: Vec<OpenBlock> = Vec::new();
-    // autonumber state: Some((next_index, step)) when active.
+    let mut acts = ActivationState::default();
     let mut autonum: Option<(i64, i64)> = None;
-    for (eid, ev) in d.events.iter().enumerate() {
+    let mut sid = 0usize;
+    for ev in &d.events {
+        let eid = sid;
+        sid += 1;
         match ev {
             SeqEvent::Autonumber(v) => autonum = *v,
+            SeqEvent::Activate(a) => acts.start(*a, &actors, cursor, eid),
+            SeqEvent::Deactivate(a) => acts.end(*a, cursor),
             SeqEvent::Block(b) => handle_block(
                 b,
                 eid,
@@ -407,32 +491,42 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 let c = cursor;
                 let line_y = c + line_height + text_h + BOX_MARGIN;
                 let text_y = (c + 15.0).round();
+                cursor = line_y;
 
-                let (fcx, tcx) = (actors[m.from].cx(), actors[m.to].cx());
-                let (start_x, stop_x) = if m.from <= m.to {
-                    let mut stop = tcx - 1.0;
-                    if has_end_marker(m.arrow) {
-                        stop -= 3.0;
-                    }
-                    (fcx + 1.0, stop)
-                } else {
-                    let mut stop = tcx + 1.0;
-                    if has_end_marker(m.arrow) {
-                        stop += 3.0;
-                    }
-                    (fcx - 1.0, stop)
-                };
+                // A `+` suffix activates the target *before* the line is placed,
+                // so the arrow already lands on the new bar's edge (phantom
+                // activeStart consumes the next stream id).
+                if m.activate {
+                    acts.start(m.to, &actors, line_y, sid);
+                    sid += 1;
+                }
+
+                // Endpoints from activation bounds (base = cx ± 1, matching the
+                // no-activation case): near edge of source, far edge of target.
+                let (fl, fr) = acts.bounds(m.from, &actors);
+                let (tl, tr) = acts.bounds(m.to, &actors);
+                let l2r = fl <= tl;
+                let mut start_x = if l2r { fr } else { fl };
+                let mut stop_x = if l2r { tl } else { tr };
+                if has_end_marker(m.arrow) {
+                    stop_x += if l2r { -3.0 } else { 3.0 };
+                }
+                let _ = &mut start_x;
+
+                // A `-` suffix ends the source's bar at this line.
+                if m.deactivate {
+                    acts.end(m.from, line_y);
+                    sid += 1;
+                }
 
                 let seq_num = autonum.map(|(idx, _)| idx);
                 if let Some((idx, step)) = autonum {
                     autonum = Some((idx + step, step));
                 }
 
-                // Loop bounds span the involved actors' outer edges (cx ± 1),
-                // not the arrowhead-adjusted line endpoints.
-                let lo = fcx.min(tcx) - 1.0;
-                let hi = fcx.max(tcx) + 1.0;
-                expand_open(&mut open, lo, hi, line_y);
+                // Loop bounds span the involved actors' outer edges (activation
+                // bounds), not the arrowhead-adjusted endpoints.
+                expand_open(&mut open, fl.min(tl), fr.max(tr), line_y);
                 messages.push(PlacedMessage {
                     id: eid,
                     from: m.from,
@@ -445,11 +539,10 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     stop_x,
                     seq_num,
                 });
-                cursor = line_y;
             }
-            SeqEvent::Activate(_) | SeqEvent::Deactivate(_) => {} // activations: TBD
         }
     }
+    let activations = acts.finish();
 
     // 6. Bottom (mirror) actors.
     cursor += BOX_MARGIN * 2.0;
@@ -469,6 +562,10 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     for b in &blocks {
         box_startx = box_startx.min(b.startx);
         box_stopx = box_stopx.max(b.stopx);
+    }
+    for a in &activations {
+        box_startx = box_startx.min(a.x);
+        box_stopx = box_stopx.max(a.x + a.w);
     }
     let box_starty = top_y;
     let box_stopy = cursor;
@@ -491,6 +588,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         messages,
         notes,
         blocks,
+        activations,
         top_y,
         bottom_y,
         actor_height: max_actor_h,
