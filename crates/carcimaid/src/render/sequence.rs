@@ -490,26 +490,13 @@ fn end_marker_id(arrow: SeqArrow) -> Option<&'static str> {
     }
 }
 
-/// A compact sequence `<style>` block. Structural comparison ignores `<style>`
-/// text, so this only needs to carry the visual essentials (line/text colours).
+/// The sequence `<style>` block — mermaid's default-theme CSS verbatim. These
+/// stylesheet rules override the elements' presentation attributes (lifeline
+/// stroke, loop-line dash/colour, activation fill, all-`line` width), so
+/// emitting them is what makes the render match the oracle visually. Structural
+/// comparison ignores `<style>` text.
 fn style_block() -> String {
-    format!(
-        concat!(
-            "<style>#{id}{{font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;fill:#333;}}",
-            "#{id} .actor{{stroke:#9370DB;fill:#ECECFF;}}",
-            "#{id} text.actor>tspan{{fill:black;stroke:none;}}",
-            "#{id} .actor-line{{stroke:#999;}}",
-            "#{id} .messageLine0{{stroke-width:1.5;stroke-dasharray:none;stroke:#333;}}",
-            "#{id} .messageLine1{{stroke-width:1.5;stroke-dasharray:2,2;stroke:#333;}}",
-            "#{id} .messageText{{fill:#333;stroke:none;font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:16px;}}",
-            "#{id} .sequenceNumber{{fill:white;}}",
-            "#{id} #arrowhead path{{fill:#333;stroke:#333;}}",
-            "#{id} .note{{stroke:#aaaa33;fill:#fff5ad;}}",
-            "#{id} .noteText{{fill:black;stroke:none;font-family:\"trebuchet ms\",verdana,arial,sans-serif;font-size:14px;}}",
-            "</style>",
-        ),
-        id = ID,
-    )
+    format!("<style>{}</style>", seq_defs::SEQ_STYLE)
 }
 
 /// Format a coordinate: integers without a decimal point, else trimmed to 3dp
