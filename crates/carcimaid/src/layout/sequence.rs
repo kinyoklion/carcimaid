@@ -4,7 +4,7 @@
 //! (loop/alt/opt/par/rect) and activations parse but do not yet contribute
 //! geometry — they will be layered on next. See `scratchpad/seq_spec.md`.
 
-use crate::ir::{NotePlacement, SeqArrow, SeqEvent, SequenceDiagram};
+use crate::ir::{BlockBoundary, NotePlacement, SeqArrow, SeqEvent, SequenceDiagram};
 use crate::text;
 
 // --- mermaid sequence config defaults (see SequenceDiagramConfig). ---
@@ -14,9 +14,11 @@ const ACTOR_MARGIN: f64 = 50.0;
 const ACTOR_WIDTH: f64 = 150.0;
 const ACTOR_HEIGHT: f64 = 65.0;
 const BOX_MARGIN: f64 = 10.0;
+const BOX_TEXT_MARGIN: f64 = 5.0;
 const NOTE_MARGIN: f64 = 10.0;
 const WRAP_PADDING: f64 = 10.0;
 const BOTTOM_MARGIN_ADJ: f64 = 1.0;
+const LABEL_BOX_HEIGHT: f64 = 20.0;
 /// Actor/message label font size. mermaid's CLI emits actor and message labels
 /// at 16px (the schema's 14 is overridden at runtime); both are calibrated to
 /// the oracle here.
@@ -40,6 +42,8 @@ pub struct LaidOutSequence {
     pub actors: Vec<PlacedActor>,
     pub messages: Vec<PlacedMessage>,
     pub notes: Vec<PlacedNote>,
+    /// Control-structure boxes (loop/alt/opt/par), in event order.
+    pub blocks: Vec<PlacedBlock>,
     /// Y of the top actor boxes (0) and the bottom (mirror) boxes.
     pub top_y: f64,
     pub bottom_y: f64,
@@ -63,6 +67,24 @@ impl PlacedActor {
     pub fn cx(&self) -> f64 {
         self.x + self.width / 2.0
     }
+}
+
+/// A control-structure box (loop / alt / opt / par) with its label, condition,
+/// and section dividers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedBlock {
+    /// Event-stream index of the closing `end` (mermaid's `data-id`).
+    pub id: usize,
+    /// Keyword label shown in the corner tab (`loop`/`alt`/`opt`/`par`).
+    pub label: String,
+    /// The condition/title text (`[…]`), if any.
+    pub title: String,
+    pub startx: f64,
+    pub stopx: f64,
+    pub starty: f64,
+    pub stopy: f64,
+    /// `else`/`and` section dividers: `(y, title)`.
+    pub sections: Vec<(f64, String)>,
 }
 
 /// A note box attached to one or more participants.
@@ -112,6 +134,132 @@ fn split_lines(text: &str) -> Vec<String> {
         .split('\n')
         .map(|s| s.trim().to_string())
         .collect()
+}
+
+fn box_startx_actors(actors: &[PlacedActor]) -> f64 {
+    actors.iter().map(|a| a.x).fold(0.0_f64, f64::min)
+}
+fn box_stopx_actors(actors: &[PlacedActor]) -> f64 {
+    actors.iter().map(|a| a.x + a.width).fold(0.0_f64, f64::max)
+}
+
+/// Advance the cursor and stack/close a block for a [`BlockBoundary`] event.
+/// `fallback_lo/hi` bound an empty block's box to the actor span.
+fn handle_block(
+    b: &BlockBoundary,
+    eid: usize,
+    cursor: &mut f64,
+    open: &mut Vec<OpenBlock>,
+    blocks: &mut Vec<PlacedBlock>,
+    fallback_lo: f64,
+    fallback_hi: f64,
+) {
+    // The label extra height mermaid adds for a non-empty condition/section.
+    let label_extra = |title: &str| {
+        if title.trim().is_empty() {
+            0.0
+        } else {
+            SEQ_LINE_HEIGHT.max(LABEL_BOX_HEIGHT)
+        }
+    };
+    let start = |label: &str, title: &str, cursor: &mut f64, open: &mut Vec<OpenBlock>| {
+        *cursor += BOX_MARGIN; // preMargin
+        let starty = *cursor;
+        *cursor += BOX_MARGIN + BOX_TEXT_MARGIN + label_extra(title); // postMargin + label
+        open.push(OpenBlock {
+            label: label.to_string(),
+            title: title.to_string(),
+            starty,
+            minx: f64::INFINITY,
+            maxx: f64::NEG_INFINITY,
+            maxy: starty,
+            sections: Vec::new(),
+            is_rect: false,
+        });
+    };
+    let section = |title: &str, cursor: &mut f64, open: &mut [OpenBlock]| {
+        *cursor += BOX_MARGIN + BOX_TEXT_MARGIN;
+        let y = *cursor;
+        *cursor += BOX_MARGIN + label_extra(title);
+        if let Some(b) = open.last_mut() {
+            b.sections.push((y, title.to_string()));
+        }
+    };
+    match b {
+        BlockBoundary::LoopStart(t) => start("loop", t, cursor, open),
+        BlockBoundary::AltStart(t) => start("alt", t, cursor, open),
+        BlockBoundary::OptStart(t) => start("opt", t, cursor, open),
+        BlockBoundary::ParStart(t) => start("par", t, cursor, open),
+        BlockBoundary::AltElse(t) | BlockBoundary::ParAnd(t) => section(t, cursor, open),
+        BlockBoundary::RectStart(_) => {
+            // Coloured background region: cursor stepping only (no box render yet).
+            *cursor += BOX_MARGIN;
+            open.push(OpenBlock {
+                label: String::new(),
+                title: String::new(),
+                starty: *cursor,
+                minx: f64::INFINITY,
+                maxx: f64::NEG_INFINITY,
+                maxy: *cursor,
+                sections: Vec::new(),
+                is_rect: true,
+            });
+            *cursor += BOX_MARGIN;
+        }
+        // `end` (parsed as LoopEnd for every construct) / explicit ends: close
+        // the top open block.
+        BlockBoundary::LoopEnd
+        | BlockBoundary::AltEnd
+        | BlockBoundary::OptEnd
+        | BlockBoundary::ParEnd
+        | BlockBoundary::RectEnd => {
+            let Some(b) = open.pop() else { return };
+            let (lo, hi) = if b.minx.is_finite() {
+                (b.minx, b.maxx)
+            } else {
+                (fallback_lo, fallback_hi)
+            };
+            let startx = lo - BOX_MARGIN;
+            let stopx = hi + BOX_MARGIN;
+            let stopy = b.maxy + BOX_MARGIN;
+            *cursor = stopy;
+            if !b.is_rect {
+                blocks.push(PlacedBlock {
+                    id: eid,
+                    label: b.label,
+                    title: b.title,
+                    startx,
+                    stopx,
+                    starty: b.starty,
+                    stopy,
+                    sections: b.sections,
+                });
+            }
+        }
+    }
+}
+
+/// A block being accumulated between its start and `end` while walking events.
+struct OpenBlock {
+    label: String,
+    title: String,
+    starty: f64,
+    /// Content bounding box (min/max x, max stop-y) of enclosed messages/notes.
+    minx: f64,
+    maxx: f64,
+    maxy: f64,
+    sections: Vec<(f64, String)>,
+    is_rect: bool,
+}
+
+/// Expand every open block's content bbox with an enclosed element spanning
+/// `[x0, x1]` horizontally down to `stopy`.
+fn expand_open(open: &mut [OpenBlock], x0: f64, x1: f64, stopy: f64) {
+    for b in open.iter_mut() {
+        b.minx = b.minx.min(x0.min(x1));
+        b.maxx = b.maxx.max(x0.max(x1));
+        b.maxy = b.maxy.max(stopy);
+    }
 }
 
 /// Note box `(startx, width)` from mermaid's `buildNoteModel`, by placement.
@@ -219,11 +367,22 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let mut cursor = max_actor_h; // bumpVerticalPos(maxHeight) after actors
     let mut messages = Vec::new();
     let mut notes = Vec::new();
+    let mut blocks: Vec<PlacedBlock> = Vec::new();
+    let mut open: Vec<OpenBlock> = Vec::new();
     // autonumber state: Some((next_index, step)) when active.
     let mut autonum: Option<(i64, i64)> = None;
     for (eid, ev) in d.events.iter().enumerate() {
         match ev {
             SeqEvent::Autonumber(v) => autonum = *v,
+            SeqEvent::Block(b) => handle_block(
+                b,
+                eid,
+                &mut cursor,
+                &mut open,
+                &mut blocks,
+                box_startx_actors(&actors),
+                box_stopx_actors(&actors),
+            ),
             SeqEvent::Note(note) => {
                 cursor += BOX_MARGIN; // bumpVerticalPos(boxMargin)
                 let starty = cursor;
@@ -231,6 +390,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 let lines = split_lines(&note.text).len().max(1) as f64;
                 let height = lines * SEQ_LINE_HEIGHT + 2.0 * NOTE_MARGIN;
                 cursor += height;
+                expand_open(&mut open, nx, nx + nw, starty + height);
                 notes.push(PlacedNote {
                     id: eid,
                     x: nx,
@@ -268,6 +428,11 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     autonum = Some((idx + step, step));
                 }
 
+                // Loop bounds span the involved actors' outer edges (cx ± 1),
+                // not the arrowhead-adjusted line endpoints.
+                let lo = fcx.min(tcx) - 1.0;
+                let hi = fcx.max(tcx) + 1.0;
+                expand_open(&mut open, lo, hi, line_y);
                 messages.push(PlacedMessage {
                     id: eid,
                     from: m.from,
@@ -282,7 +447,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 });
                 cursor = line_y;
             }
-            _ => {} // notes / blocks / activations: geometry TBD
+            SeqEvent::Activate(_) | SeqEvent::Deactivate(_) => {} // activations: TBD
         }
     }
 
@@ -300,6 +465,10 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     for note in &notes {
         box_startx = box_startx.min(note.x);
         box_stopx = box_stopx.max(note.x + note.width);
+    }
+    for b in &blocks {
+        box_startx = box_startx.min(b.startx);
+        box_stopx = box_stopx.max(b.stopx);
     }
     let box_starty = top_y;
     let box_stopy = cursor;
@@ -321,6 +490,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         actors,
         messages,
         notes,
+        blocks,
         top_y,
         bottom_y,
         actor_height: max_actor_h,

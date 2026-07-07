@@ -72,10 +72,17 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     out.push_str(seq_defs::SYMBOL_DEFS);
     out.push_str(seq_defs::MARKER_DEFS);
 
-    // 7. Notes (all notes precede all messages in mermaid's DOM), then
-    //    messages: text then line (+ optional autonumber circle/number).
-    for note in &s.notes {
-        note_box(&mut out, note);
+    // 7. Notes and control-structure boxes, in event order (both precede all
+    //    messages in mermaid's DOM), then messages.
+    let mut pre: Vec<(usize, PreElem)> = Vec::new();
+    pre.extend(s.notes.iter().map(|nt| (nt.id, PreElem::Note(nt))));
+    pre.extend(s.blocks.iter().map(|b| (b.id, PreElem::Block(b))));
+    pre.sort_by_key(|(id, _)| *id);
+    for (_, el) in &pre {
+        match el {
+            PreElem::Note(nt) => note_box(&mut out, nt),
+            PreElem::Block(b) => block_box(&mut out, b),
+        }
     }
     for m in &s.messages {
         message(&mut out, m, &s.actors);
@@ -140,6 +147,102 @@ fn actor_box(
     if !top {
         out.push_str("</g>");
     }
+}
+
+/// A pre-message element (note or control-structure block), for event-ordered
+/// emission.
+enum PreElem<'a> {
+    Note(&'a crate::layout::sequence::PlacedNote),
+    Block(&'a crate::layout::sequence::PlacedBlock),
+}
+
+/// Emit a control-structure box: 4 `loopLine`s, section dividers, the corner
+/// `labelBox` polygon + `labelText`, the `loopText` condition, and section
+/// titles — matching mermaid's `drawLoop`.
+fn block_box(out: &mut String, b: &crate::layout::sequence::PlacedBlock) {
+    let _ = write!(out, r#"<g data-et="control-structure" data-id="i{}">"#, b.id);
+    let line = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64, dashed: bool| {
+        let style = if dashed { r#" style="stroke-dasharray: 3, 3;""# } else { "" };
+        let _ = write!(
+            out,
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" class="loopLine"{}/>"#,
+            n(x1), n(y1), n(x2), n(y2), style,
+        );
+    };
+    // Box border: top, right, bottom, left.
+    line(out, b.startx, b.starty, b.stopx, b.starty, false);
+    line(out, b.stopx, b.starty, b.stopx, b.stopy, false);
+    line(out, b.startx, b.stopy, b.stopx, b.stopy, false);
+    line(out, b.startx, b.starty, b.startx, b.stopy, false);
+    // Section dividers (else/and).
+    for (y, _) in &b.sections {
+        line(out, b.startx, *y, b.stopx, *y, true);
+    }
+    // Corner label tab + keyword.
+    let _ = write!(
+        out,
+        r#"<polygon points="{}" class="labelBox"/>"#,
+        genpoints(b.startx, b.starty, 50.0, 20.0, 7.0),
+    );
+    let _ = write!(
+        out,
+        concat!(
+            r#"<text x="{x}" y="{y}" text-anchor="middle" dominant-baseline="middle" "#,
+            r#"alignment-baseline="middle" class="labelText" style="font-size: 16px; font-weight: 400;">{t}</text>"#,
+        ),
+        x = n((b.startx + 25.0).round()),
+        y = n((b.starty + 12.5).round()),
+        t = esc(&b.label),
+    );
+    // Condition text.
+    if !b.title.trim().is_empty() {
+        let cx = b.startx + 25.0 + (b.stopx - b.startx) / 2.0;
+        let _ = write!(
+            out,
+            concat!(
+                r#"<text x="{x}" y="{y}" text-anchor="middle" class="loopText" "#,
+                r#"style="font-size: 16px; font-weight: 400;"><tspan x="{x}">[{t}]</tspan></text>"#,
+            ),
+            x = n(cx),
+            y = n((b.starty + 17.5).round()),
+            t = esc(&b.title),
+        );
+    }
+    // Section titles (else/and conditions).
+    for (y, title) in &b.sections {
+        if title.trim().is_empty() {
+            continue;
+        }
+        let cx = b.startx + (b.stopx - b.startx) / 2.0;
+        let _ = write!(
+            out,
+            concat!(
+                r#"<text x="{x}" y="{y}" text-anchor="middle" class="sectionTitle" "#,
+                r#"style="font-size: 16px; font-weight: 400;">[{t}]</text>"#,
+            ),
+            x = n(cx),
+            y = n((y + 17.5).round()),
+            t = esc(title),
+        );
+    }
+    out.push_str("</g>");
+}
+
+/// mermaid's `genPoints` for the label tab polygon (cut corner).
+fn genpoints(x: f64, y: f64, w: f64, h: f64, cut: f64) -> String {
+    format!(
+        "{},{} {},{} {},{} {},{} {},{}",
+        n(x),
+        n(y),
+        n(x + w),
+        n(y),
+        n(x + w),
+        n(y + h - cut),
+        n(x + w - cut * 1.2),
+        n(y + h),
+        n(x),
+        n(y + h),
+    )
 }
 
 /// Emit a note: `<g data-et="note">` wrapping a `note` rect + `noteText`.
