@@ -37,6 +37,19 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         s.top_y + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
     };
 
+    // 0. Coloured `rect` background regions are drawn first (behind everything).
+    for r in &s.rects {
+        let _ = write!(
+            out,
+            r#"<rect x="{x}" y="{y}" fill="{f}" width="{w}" height="{h}" class="rect"/>"#,
+            x = n(r.x),
+            y = n(r.y),
+            f = esc(&r.fill),
+            w = n(r.w),
+            h = n(r.h),
+        );
+    }
+
     // 1. Bottom (footer) actors, reverse participant order. A box footer is a
     //    `<g>` with rect+label; an actor footer's *lowered* part is an empty
     //    `<g>` (its glyph is emitted later, after the defs).

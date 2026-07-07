@@ -47,6 +47,8 @@ pub struct LaidOutSequence {
     pub blocks: Vec<PlacedBlock>,
     /// Activation bars.
     pub activations: Vec<PlacedActivation>,
+    /// Coloured `rect` background regions (drawn behind everything).
+    pub rects: Vec<PlacedRect>,
     /// Y of the top actor boxes (0) and the bottom (mirror) boxes.
     pub top_y: f64,
     pub bottom_y: f64,
@@ -223,12 +225,14 @@ fn box_stopx_actors(actors: &[PlacedActor]) -> f64 {
 
 /// Advance the cursor and stack/close a block for a [`BlockBoundary`] event.
 /// `fallback_lo/hi` bound an empty block's box to the actor span.
+#[allow(clippy::too_many_arguments)]
 fn handle_block(
     b: &BlockBoundary,
     eid: usize,
     cursor: &mut f64,
     open: &mut Vec<OpenBlock>,
     blocks: &mut Vec<PlacedBlock>,
+    rects: &mut Vec<PlacedRect>,
     fallback_lo: f64,
     fallback_hi: f64,
 ) {
@@ -253,6 +257,7 @@ fn handle_block(
             maxy: starty,
             sections: Vec::new(),
             is_rect: false,
+            fill: String::new(),
         });
     };
     let section = |title: &str, cursor: &mut f64, open: &mut [OpenBlock]| {
@@ -269,8 +274,8 @@ fn handle_block(
         BlockBoundary::OptStart(t) => start("opt", t, cursor, open),
         BlockBoundary::ParStart(t) => start("par", t, cursor, open),
         BlockBoundary::AltElse(t) | BlockBoundary::ParAnd(t) => section(t, cursor, open),
-        BlockBoundary::RectStart(_) => {
-            // Coloured background region: cursor stepping only (no box render yet).
+        BlockBoundary::RectStart(color) => {
+            // Coloured background region (rendered as a filled rect at the back).
             *cursor += BOX_MARGIN;
             open.push(OpenBlock {
                 label: String::new(),
@@ -281,6 +286,7 @@ fn handle_block(
                 maxy: *cursor,
                 sections: Vec::new(),
                 is_rect: true,
+                fill: color.clone(),
             });
             *cursor += BOX_MARGIN;
         }
@@ -301,7 +307,15 @@ fn handle_block(
             let stopx = hi + BOX_MARGIN;
             let stopy = b.maxy + BOX_MARGIN;
             *cursor = stopy;
-            if !b.is_rect {
+            if b.is_rect {
+                rects.push(PlacedRect {
+                    x: startx,
+                    y: b.starty,
+                    w: stopx - startx,
+                    h: stopy - b.starty,
+                    fill: b.fill,
+                });
+            } else {
                 blocks.push(PlacedBlock {
                     id: eid,
                     label: b.label,
@@ -328,6 +342,18 @@ struct OpenBlock {
     maxy: f64,
     sections: Vec<(f64, String)>,
     is_rect: bool,
+    /// Fill colour for `rect` background regions.
+    fill: String,
+}
+
+/// A coloured `rect` background region.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub fill: String,
 }
 
 /// Expand every open block's content bbox with an enclosed element spanning
@@ -447,6 +473,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let mut messages = Vec::new();
     let mut notes = Vec::new();
     let mut blocks: Vec<PlacedBlock> = Vec::new();
+    let mut rects: Vec<PlacedRect> = Vec::new();
     let mut open: Vec<OpenBlock> = Vec::new();
     let mut acts = ActivationState::default();
     let mut autonum: Option<(i64, i64)> = None;
@@ -464,6 +491,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 &mut cursor,
                 &mut open,
                 &mut blocks,
+                &mut rects,
                 box_startx_actors(&actors),
                 box_stopx_actors(&actors),
             ),
@@ -567,6 +595,10 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         box_startx = box_startx.min(a.x);
         box_stopx = box_stopx.max(a.x + a.w);
     }
+    for r in &rects {
+        box_startx = box_startx.min(r.x);
+        box_stopx = box_stopx.max(r.x + r.w);
+    }
     let box_starty = top_y;
     let box_stopy = cursor;
 
@@ -589,6 +621,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         notes,
         blocks,
         activations,
+        rects,
         top_y,
         bottom_y,
         actor_height: max_actor_h,
