@@ -20,6 +20,8 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
     let mut d = SequenceDiagram::default();
     let mut header_seen = false;
 
+    // The `box` currently open (participants declared inside join it).
+    let mut cur_box: Option<usize> = None;
     for raw in split_statements(source) {
         let stmt = raw.trim();
         if stmt.is_empty() {
@@ -27,20 +29,16 @@ pub fn parse(source: &str) -> Result<SequenceDiagram> {
         }
         if !header_seen {
             header_seen = true;
-            // The header may carry a trailing statement after `;`; the splitter
-            // already separated those, so just consume the `sequenceDiagram`
-            // keyword line.
             if stmt.split_whitespace().next() == Some("sequenceDiagram") {
                 let rest = stmt["sequenceDiagram".len()..].trim();
                 if rest.is_empty() {
                     continue;
                 }
-                // Fall through to parse a same-line statement.
-                parse_statement(rest, &mut d);
+                parse_statement(rest, &mut d, &mut cur_box);
                 continue;
             }
         }
-        parse_statement(stmt, &mut d);
+        parse_statement(stmt, &mut d, &mut cur_box);
     }
     Ok(d)
 }
@@ -66,7 +64,7 @@ fn split_statements(source: &str) -> Vec<String> {
 }
 
 /// Parse one statement into the diagram, dispatching on its leading keyword.
-fn parse_statement(stmt: &str, d: &mut SequenceDiagram) {
+fn parse_statement(stmt: &str, d: &mut SequenceDiagram, cur_box: &mut Option<usize>) {
     // accessibility metadata
     if let Some(rest) = stmt.strip_prefix("accTitle") {
         d.acc_title = Some(rest.trim().trim_start_matches(':').trim().to_string());
@@ -81,23 +79,35 @@ fn parse_statement(stmt: &str, d: &mut SequenceDiagram) {
         d.title = Some(rest.trim_start_matches(':').trim().to_string());
         return;
     }
+    // `box [color] name` — open a participant grouping.
+    if let Some(rest) = keyword(stmt, "box") {
+        let (color, name) = parse_box_header(rest.trim());
+        d.boxes.push(crate::ir::SeqBox { name, color });
+        *cur_box = Some(d.boxes.len() - 1);
+        return;
+    }
+    // `end` closes an open box (else it's a block boundary, handled below).
+    if stmt == "end" && cur_box.is_some() {
+        *cur_box = None;
+        return;
+    }
     // participant / actor declarations
     if let Some(rest) = keyword(stmt, "participant") {
-        declare_participant(rest, false, d);
+        declare_participant(rest, false, d, *cur_box);
         return;
     }
     if let Some(rest) = keyword(stmt, "actor") {
-        declare_participant(rest, true, d);
+        declare_participant(rest, true, d, *cur_box);
         return;
     }
     if let Some(rest) = keyword(stmt, "create") {
         // `create participant X` / `create actor X` / `create X`
         if let Some(r) = keyword(rest, "participant") {
-            declare_participant(r, false, d);
+            declare_participant(r, false, d, *cur_box);
         } else if let Some(r) = keyword(rest, "actor") {
-            declare_participant(r, true, d);
+            declare_participant(r, true, d, *cur_box);
         } else {
-            declare_participant(rest, false, d);
+            declare_participant(rest, false, d, *cur_box);
         }
         return;
     }
@@ -140,10 +150,9 @@ fn parse_statement(stmt: &str, d: &mut SequenceDiagram) {
         d.events.push(SeqEvent::Block(b));
         return;
     }
-    // `box`/`end` grouping and links: recognised but not modelled yet (skipped
-    // so they don't become phantom messages).
-    if keyword(stmt, "box").is_some()
-        || keyword(stmt, "link").is_some()
+    // Links/properties: recognised but not modelled yet (skipped so they don't
+    // become phantom messages).
+    if keyword(stmt, "link").is_some()
         || keyword(stmt, "links").is_some()
         || keyword(stmt, "properties").is_some()
         || keyword(stmt, "details").is_some()
@@ -188,7 +197,8 @@ fn parse_block_boundary(stmt: &str, _d: &mut SequenceDiagram) -> Option<BlockBou
 }
 
 /// Parse a `participant`/`actor` declaration body: `X` or `X as Alias`.
-fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram) {
+/// `box_idx` is the enclosing `box` grouping, if any.
+fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram, box_idx: Option<usize>) {
     let body = body.trim();
     // Strip a trailing `@{ ... }` metadata block (participant shapes).
     let body = body.split('@').next().unwrap_or(body).trim();
@@ -204,8 +214,11 @@ fn declare_participant(body: &str, is_actor: bool, d: &mut SequenceDiagram) {
             // Re-declaration updates label/kind.
             d.participants[i].label = label;
             d.participants[i].is_actor = is_actor;
+            if box_idx.is_some() {
+                d.participants[i].box_idx = box_idx;
+            }
         }
-        None => d.participants.push(Participant { id, label, is_actor }),
+        None => d.participants.push(Participant { id, label, is_actor, box_idx }),
     }
 }
 
@@ -220,8 +233,44 @@ fn ensure_participant(id: &str, is_actor: bool, d: &mut SequenceDiagram) -> usiz
         id: id.to_string(),
         label: id.to_string(),
         is_actor,
+        box_idx: None,
     });
     d.participants.len() - 1
+}
+
+/// Parse a `box` header: an optional leading colour (`rgb(...)`, `#hex`, or a
+/// CSS colour name) followed by the box name.
+fn parse_box_header(rest: &str) -> (Option<String>, String) {
+    let first = rest.split_whitespace().next().unwrap_or("");
+    let is_color = first.starts_with("rgb(")
+        || first.starts_with("rgba(")
+        || first.starts_with('#')
+        || is_color_name(first);
+    if is_color && !first.is_empty() {
+        // rgb(...) may contain spaces; split at the closing paren if present.
+        if let Some(close) = rest.find(')') {
+            if rest[..close].contains('(') {
+                let color = rest[..=close].to_string();
+                return (Some(color), rest[close + 1..].trim().to_string());
+            }
+        }
+        let name = rest[first.len()..].trim().to_string();
+        (Some(first.to_string()), name)
+    } else {
+        (None, rest.to_string())
+    }
+}
+
+/// A small set of CSS colour names used by `box`/`rect` in the corpus (plus
+/// common ones). Not exhaustive — unknown words are treated as box names.
+fn is_color_name(w: &str) -> bool {
+    matches!(
+        w.to_ascii_lowercase().as_str(),
+        "transparent" | "red" | "green" | "blue" | "purple" | "yellow" | "orange" | "pink"
+            | "cyan" | "magenta" | "black" | "white" | "gray" | "grey" | "lightgreen"
+            | "lightblue" | "lightgrey" | "lightgray" | "lightyellow" | "lightpink"
+            | "aqua" | "teal" | "navy" | "olive" | "maroon" | "silver" | "gold" | "coral"
+    )
 }
 
 /// Parse a `note` statement: `left of X: t` / `right of X: t` / `over X[,Y]: t`.

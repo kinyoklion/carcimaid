@@ -49,6 +49,8 @@ pub struct LaidOutSequence {
     pub activations: Vec<PlacedActivation>,
     /// Coloured `rect` background regions (drawn behind everything).
     pub rects: Vec<PlacedRect>,
+    /// Participant `box` groupings (drawn behind actors).
+    pub boxes: Vec<PlacedBox>,
     /// Y of the top actor boxes (0) and the bottom (mirror) boxes.
     pub top_y: f64,
     pub bottom_y: f64,
@@ -348,6 +350,22 @@ struct OpenBlock {
     fill: String,
 }
 
+/// A participant `box` grouping rect + label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedBox {
+    /// Rect geometry (already padded).
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// Fill colour (CSS) or `None` (transparent).
+    pub color: Option<String>,
+    pub name: String,
+    /// Centre x and baseline y of the label.
+    pub label_cx: f64,
+    pub label_y: f64,
+}
+
 /// A coloured `rect` background region.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedRect {
@@ -442,13 +460,42 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         margins[i] = w.max(ACTOR_MARGIN);
     }
 
-    // 4. Actor x positions.
+    // 3b. Per-box margin (boxTextMargin, widened if the box label is wider than
+    //     its members) + which participants belong to each box.
+    let nb = d.boxes.len();
+    let box_margin = vec![BOX_TEXT_MARGIN; nb]; // label-overflow term omitted (rare)
+
+    // 4. Actor x positions, injecting box entry/exit margins (mermaid's
+    //    addActorRenderingData). `box_x`/`box_right` bound each box.
     let mut xs = vec![0.0_f64; n];
+    let mut box_x = vec![0.0_f64; nb];
+    let mut box_right = vec![0.0_f64; nb];
+    let mut box_seen = vec![false; nb];
     let (mut prev_width, mut prev_margin) = (0.0_f64, 0.0_f64);
+    let mut prev_box: Option<usize> = None;
     for i in 0..n {
+        let bx = d.participants[i].box_idx;
+        // Leaving a box.
+        if let Some(pb) = prev_box {
+            if Some(pb) != bx {
+                prev_margin += BOX_MARGIN + box_margin[pb];
+            }
+        }
+        // Entering a box.
+        if let Some(b) = bx {
+            if Some(b) != prev_box && !box_seen[b] {
+                box_x[b] = prev_width + prev_margin;
+                box_seen[b] = true;
+                prev_margin += box_margin[b];
+            }
+        }
         xs[i] = prev_width + prev_margin;
         prev_width += widths[i] + prev_margin;
+        if let Some(b) = bx {
+            box_right[b] = prev_width + box_margin[b];
+        }
         prev_margin = margins[i];
+        prev_box = bx;
     }
 
     let actors: Vec<PlacedActor> = d
@@ -465,13 +512,17 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         .collect();
 
     let max_actor_h = ACTOR_HEIGHT; // single-line labels for now
-    let top_y = 0.0;
+    // A participant `box` reserves space above the actors for its label, so the
+    // whole diagram shifts down by boxMargin + label height when boxes exist.
+    let has_boxes = box_seen.iter().any(|&s| s);
+    let box_label_h = SEQ_LINE_HEIGHT; // single-line box names
+    let top_y = if has_boxes { BOX_MARGIN + box_label_h } else { 0.0 };
 
     // 5. Walk the event stream in order, stepping the shared vertical cursor.
     //    `sid` is the event-stream index used for `data-id`. mermaid inserts a
     //    phantom activeStart/End message for a `+`/`-` suffix, so `sid` skips an
     //    extra slot for those (keeping later ids aligned).
-    let mut cursor = max_actor_h; // bumpVerticalPos(maxHeight) after actors
+    let mut cursor = top_y + max_actor_h; // bumpVerticalPos(maxHeight) after actors
     let mut messages = Vec::new();
     let mut notes = Vec::new();
     let mut blocks: Vec<PlacedBlock> = Vec::new();
@@ -599,6 +650,31 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let bottom_y = cursor;
     cursor += max_actor_h + BOX_MARGIN;
 
+    // 6c. Participant boxes span the full content height. Padding = boxMargin*2.
+    let boxes: Vec<PlacedBox> = d
+        .boxes
+        .iter()
+        .enumerate()
+        .filter(|(b, _)| box_seen[*b])
+        .map(|(b, sb)| {
+            // The box rect starts at y=0 (above the shifted-down actors); its
+            // label sits in the reserved band at top.
+            let pad = BOX_MARGIN * 2.0;
+            let bw = box_right[b] - box_x[b];
+            let bh = cursor; // box.height = final verticalPos - box.y(0)
+            PlacedBox {
+                x: box_x[b] - pad,
+                y: -pad * 0.25,
+                w: bw + 2.0 * pad,
+                h: bh + pad * 0.75,
+                color: sb.color.clone(),
+                name: sb.name.clone(),
+                label_cx: box_x[b] + bw / 2.0,
+                label_y: BOX_TEXT_MARGIN + box_label_h / 2.0,
+            }
+        })
+        .collect();
+
     // 7. Content bounding box (actors + note extents; notes can overhang).
     let mut box_startx = actors.iter().map(|a| a.x).fold(0.0_f64, f64::min);
     let mut box_stopx = actors
@@ -627,7 +703,17 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         box_startx = box_startx.min(m.start_x.min(m.stop_x));
         box_stopx = box_stopx.max(hi);
     }
-    let box_starty = top_y;
+    // Boxes contribute their *unpadded* extent to the diagram bounds (the
+    // padded rect overflows visually but doesn't grow the viewBox); mermaid
+    // inserts `box.x .. box.x + box.width`.
+    for (b, seen) in box_seen.iter().enumerate() {
+        if *seen {
+            box_startx = box_startx.min(box_x[b]);
+            box_stopx = box_stopx.max(box_right[b]);
+        }
+    }
+    // A box grouping starts at y=0 (above the down-shifted actors).
+    let box_starty = if has_boxes { 0.0 } else { top_y };
     let box_stopy = cursor;
 
     // 8. Overall size & viewBox (mirrorActors is always on for us).
@@ -650,6 +736,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         blocks,
         activations,
         rects,
+        boxes,
         top_y,
         bottom_y,
         actor_height: max_actor_h,

@@ -421,6 +421,18 @@ pub struct SequenceDiagram {
     pub participants: Vec<Participant>,
     /// The ordered event stream.
     pub events: Vec<SeqEvent>,
+    /// Participant `box` groupings (a labelled/coloured rect around a run of
+    /// participants).
+    pub boxes: Vec<SeqBox>,
+}
+
+/// A `box … end` participant grouping.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqBox {
+    /// Display name (may be empty).
+    pub name: String,
+    /// Fill colour (CSS), or `None` for a transparent box.
+    pub color: Option<String>,
 }
 
 impl SequenceDiagram {
@@ -440,6 +452,9 @@ pub struct Participant {
     pub label: String,
     /// `true` for the `actor` keyword (stick figure), `false` for `participant`.
     pub is_actor: bool,
+    /// Index into [`SequenceDiagram::boxes`] if this participant is inside a
+    /// `box … end` grouping.
+    pub box_idx: Option<usize>,
 }
 
 /// One entry in the sequence's ordered event stream.

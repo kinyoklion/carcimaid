@@ -37,7 +37,39 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         s.top_y + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
     };
 
-    // 0. Coloured `rect` background regions are drawn first (behind everything).
+    // 0a. Participant `box` groupings (drawn behind everything, lowered to front).
+    for b in &s.boxes {
+        let _ = write!(out, "<g>");
+        let fill = b.color.as_deref().unwrap_or("none");
+        let _ = write!(
+            out,
+            concat!(
+                r#"<rect x="{x}" y="{y}" fill="{f}" stroke="rgb(0,0,0, 0.5)" width="{w}" "#,
+                r#"height="{h}" class="rect"/>"#,
+            ),
+            x = n(b.x),
+            y = n(b.y),
+            f = esc(fill),
+            w = n(b.w),
+            h = n(b.h),
+        );
+        if !b.name.trim().is_empty() {
+            let _ = write!(
+                out,
+                concat!(
+                    r#"<text x="{x}" y="{y}" dominant-baseline="central" alignment-baseline="central" "#,
+                    r#"class="text" style="text-anchor: middle; font-size: 16px; font-weight: 400;">"#,
+                    r#"<tspan x="{x}" dy="0">{t}</tspan></text>"#,
+                ),
+                x = n(b.label_cx),
+                y = n(b.label_y),
+                t = esc(&b.name),
+            );
+        }
+        let _ = write!(out, "</g>");
+    }
+
+    // 0b. Coloured `rect` background regions (behind everything).
     for r in &s.rects {
         let _ = write!(
             out,
