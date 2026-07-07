@@ -317,14 +317,13 @@ fn handle_block(
         | BlockBoundary::ParEnd
         | BlockBoundary::RectEnd => {
             let Some(b) = open.pop() else { return };
-            let (lo, hi) = if b.minx.is_finite() {
-                (b.minx, b.maxx)
+            // `minx`/`maxx`/`maxy` already include the depth margin (expand_open);
+            // an empty block falls back to the actor span ± one boxMargin.
+            let (startx, stopx, stopy) = if b.minx.is_finite() {
+                (b.minx, b.maxx, b.maxy)
             } else {
-                (fallback_lo, fallback_hi)
+                (fallback_lo - BOX_MARGIN, fallback_hi + BOX_MARGIN, b.maxy)
             };
-            let startx = lo - BOX_MARGIN;
-            let stopx = hi + BOX_MARGIN;
-            let stopy = b.maxy + BOX_MARGIN;
             *cursor = stopy;
             if b.is_rect {
                 rects.push(PlacedRect {
@@ -391,13 +390,19 @@ pub struct PlacedRect {
     pub fill: String,
 }
 
-/// Expand every open block's content bbox with an enclosed element spanning
-/// `[x0, x1]` horizontally down to `stopy`.
+/// Expand every open block's box with an enclosed element spanning `[x0, x1]`
+/// horizontally down to `stopy`. Each open block is inset by `n * boxMargin`
+/// where `n` is its depth from the top of the stack (mermaid's `updateBounds`),
+/// so an outer nested block extends further out than an inner one. The margin
+/// is baked into the stored extent (the close step uses it directly).
 fn expand_open(open: &mut [OpenBlock], x0: f64, x1: f64, stopy: f64) {
-    for b in open.iter_mut() {
-        b.minx = b.minx.min(x0.min(x1));
-        b.maxx = b.maxx.max(x0.max(x1));
-        b.maxy = b.maxy.max(stopy);
+    let len = open.len();
+    let (lo, hi) = (x0.min(x1), x0.max(x1));
+    for (i, b) in open.iter_mut().enumerate() {
+        let m = (len - i) as f64 * BOX_MARGIN; // bottom-of-stack (outermost) = largest
+        b.minx = b.minx.min(lo - m);
+        b.maxx = b.maxx.max(hi + m);
+        b.maxy = b.maxy.max(stopy + m);
     }
 }
 
