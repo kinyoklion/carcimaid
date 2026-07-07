@@ -32,12 +32,24 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         id = ID,
     );
 
-    // 1. Bottom (footer) actor boxes, reverse participant order.
+    // Lifeline start y differs for actor-type (glyph, +80) vs box (+65).
+    let lifeline_y1 = |a: &crate::layout::sequence::PlacedActor| {
+        s.top_y + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
+    };
+
+    // 1. Bottom (footer) actors, reverse participant order. A box footer is a
+    //    `<g>` with rect+label; an actor footer's *lowered* part is an empty
+    //    `<g>` (its glyph is emitted later, after the defs).
     for a in s.actors.iter().rev() {
-        actor_box(&mut out, a.cx(), a.x, s.bottom_y, a.width, s.actor_height, &a.label, &a.id, false);
+        if a.is_actor {
+            out.push_str("<g></g>");
+        } else {
+            actor_box(&mut out, a.cx(), a.x, s.bottom_y, a.width, s.actor_height, &a.label, &a.id, false);
+        }
     }
-    // 2. Top actor boxes with lifelines, reverse participant order (id carries
-    //    the forward index, matching mermaid's `actor{N}`/`root-{N}`).
+    // 2. Top actors with lifelines, reverse participant order (id carries the
+    //    forward index, matching mermaid's `actor{N}`/`root-{N}`). For actors,
+    //    only the lifeline `<g>` is lowered here; the glyph comes after defs.
     for (i, a) in s.actors.iter().enumerate().rev() {
         let cx = a.cx();
         let _ = write!(out, "<g>");
@@ -50,18 +62,21 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
             ),
             i = i,
             cx = n(cx),
-            y1 = n(s.top_y + s.actor_height),
+            y1 = n(lifeline_y1(a)),
             y2 = n(s.bottom_y),
             name = esc(&a.id),
         );
-        let _ = write!(
-            out,
-            r#"<g id="root-{i}" data-et="participant" data-type="participant" data-id="{id}">"#,
-            i = i,
-            id = esc(&a.id),
-        );
-        actor_box(&mut out, cx, a.x, s.top_y, a.width, s.actor_height, &a.label, &a.id, true);
-        let _ = write!(out, "</g></g>");
+        if !a.is_actor {
+            let _ = write!(
+                out,
+                r#"<g id="root-{i}" data-et="participant" data-type="participant" data-id="{id}">"#,
+                i = i,
+                id = esc(&a.id),
+            );
+            actor_box(&mut out, cx, a.x, s.top_y, a.width, s.actor_height, &a.label, &a.id, true);
+            out.push_str("</g>");
+        }
+        out.push_str("</g>");
     }
 
     // 3. <style> (content is not structurally compared; kept compact but real).
@@ -71,6 +86,15 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     // 5. Actor icon symbols + 6. arrow markers (verbatim from the oracle).
     out.push_str(seq_defs::SYMBOL_DEFS);
     out.push_str(seq_defs::MARKER_DEFS);
+
+    // 6b. Actor-type stick-figure glyphs (non-lowered, so they land here in
+    //     participant order — all top glyphs, then all bottom glyphs). The
+    //     torso/arms id index is the participant index for top glyphs, and the
+    //     last actor index (n-1) for every bottom glyph (mermaid freezes its
+    //     `actorCnt` during the footer pass).
+    for (i, a) in s.actors.iter().enumerate().filter(|(_, a)| a.is_actor) {
+        actor_glyph(&mut out, a.cx(), s.top_y, &a.label, &a.id, true, i);
+    }
 
     // 7. Notes and control-structure boxes, in event order (both precede all
     //    messages in mermaid's DOM), then messages.
@@ -90,6 +114,13 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         message(&mut out, m, &s.actors);
     }
 
+    // Bottom (footer) actor glyphs are drawn after the messages (footer pass);
+    // their torso/arms id index is frozen at the last actor index.
+    let last = s.actors.len().saturating_sub(1);
+    for a in s.actors.iter().filter(|a| a.is_actor) {
+        actor_glyph(&mut out, a.cx(), s.bottom_y, &a.label, &a.id, false, last);
+    }
+
     // 8. Title.
     if let Some(t) = &s.title {
         let box_w = s.width - 100.0; // 2*diagramMarginX
@@ -103,6 +134,63 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
 
     out.push_str("</svg>");
     out
+}
+
+/// Height of the actor stick-figure glyph (its lifeline starts `actorY + 80`).
+const ACTOR_GLYPH_H: f64 = 80.0;
+
+/// Emit an `actor`-type stick-figure glyph (head/torso/arms/legs + label),
+/// matching mermaid's `drawActorTypeActor`. `top` selects the top/bottom class.
+fn actor_glyph(out: &mut String, cx: f64, y: f64, label: &str, id: &str, top: bool, n_idx: usize) {
+    let class = if top { "actor-man actor-top" } else { "actor-man actor-bottom" };
+    // The `data-*` participant attrs are only on the top glyph.
+    let data = if top {
+        r#" data-et="participant" data-type="actor""#
+    } else {
+        ""
+    };
+    let did = if top { format!(r#" data-id="{}""#, esc(id)) } else { String::new() };
+    let _ = write!(
+        out,
+        r#"<g class="{class}" name="{name}"{data}{did} style="stroke: rgb(147, 112, 219);">"#,
+        class = class,
+        name = esc(id),
+        data = data,
+        did = did,
+    );
+    // torso + arms carry ids; legs don't (offsets calibrated to the oracle).
+    let _ = write!(
+        out,
+        r#"<line id="actor-man-torso{n}" x1="{cx}" y1="{y1}" x2="{cx}" y2="{y2}"/>"#,
+        n = n_idx, cx = n(cx), y1 = n(y + 25.0), y2 = n(y + 45.0),
+    );
+    let _ = write!(
+        out,
+        r#"<line id="actor-man-arms{n}" x1="{x1}" y1="{yy}" x2="{x2}" y2="{yy}"/>"#,
+        n = n_idx, x1 = n(cx - 18.0), x2 = n(cx + 18.0), yy = n(y + 33.0),
+    );
+    let l = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64| {
+        let _ = write!(out, r#"<line x1="{}" y1="{}" x2="{}" y2="{}"/>"#, n(x1), n(y1), n(x2), n(y2));
+    };
+    l(out, cx - 18.0, y + 60.0, cx, y + 45.0); // left leg
+    l(out, cx, y + 45.0, cx + 16.0, y + 60.0); // right leg
+    let _ = write!(
+        out,
+        r#"<circle cx="{cx}" cy="{cy}" r="15" width="150" height="65"/>"#,
+        cx = n(cx),
+        cy = n(y + 10.0),
+    );
+    let _ = write!(
+        out,
+        concat!(
+            r#"<text x="{cx}" y="{ty}" dominant-baseline="central" alignment-baseline="central" "#,
+            r#"class="actor actor-man" style="text-anchor: middle; font-size: 16px; font-weight: 400;">"#,
+            r#"<tspan x="{cx}" dy="0">{t}</tspan></text></g>"#,
+        ),
+        cx = n(cx),
+        ty = n(y + 67.5),
+        t = esc(label),
+    );
 }
 
 /// Emit an actor box rect + centred label. `top` selects the top vs bottom
