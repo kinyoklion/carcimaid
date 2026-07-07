@@ -558,7 +558,22 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     // 3b. Per-box margin (boxTextMargin, widened if the box label is wider than
     //     its members) + which participants belong to each box.
     let nb = d.boxes.len();
-    let box_margin = vec![BOX_TEXT_MARGIN; nb]; // label-overflow term omitted (rare)
+    let mut box_margin = vec![BOX_TEXT_MARGIN; nb];
+    for b in 0..nb {
+        // mermaid: totalWidth = Σ(actor.width + actor.margin) + 8*boxMargin
+        // - 2*boxTextMargin; if the title is wider, grow the margin to close half
+        // the gap on each side so the box fits the (unwrapped) title.
+        let members_w: f64 = (0..n)
+            .filter(|&i| d.participants[i].box_idx == Some(b))
+            .map(|i| widths[i] + margins[i])
+            .sum();
+        let total_w = members_w + 8.0 * BOX_MARGIN - 2.0 * BOX_TEXT_MARGIN;
+        let title_w = label_width(&d.boxes[b].name, LABEL_FONT);
+        let min_width = total_w.max(title_w + 2.0 * WRAP_PADDING);
+        if total_w < min_width {
+            box_margin[b] += (min_width - total_w) / 2.0;
+        }
+    }
 
     // 4. Actor x positions, injecting box entry/exit margins (mermaid's
     //    addActorRenderingData). `box_x`/`box_right` bound each box.
