@@ -219,18 +219,28 @@ fn declare_participant(
     if id.is_empty() {
         return None;
     }
+    // A `wrap:` / `nowrap:` prefix on the label is a directive.
+    let mut wrap = false;
+    let mut label = label;
+    if let Some(l) = label.strip_prefix("wrap:") {
+        wrap = true;
+        label = l.trim().to_string();
+    } else if let Some(l) = label.strip_prefix("nowrap:") {
+        label = l.trim().to_string();
+    }
     match d.participant_index(&id) {
         Some(i) => {
             // Re-declaration updates label/kind.
             d.participants[i].label = label;
             d.participants[i].is_actor = is_actor;
+            d.participants[i].wrap = wrap;
             if box_idx.is_some() {
                 d.participants[i].box_idx = box_idx;
             }
             Some(i)
         }
         None => {
-            d.participants.push(Participant { id, label, is_actor, box_idx });
+            d.participants.push(Participant { id, label, is_actor, box_idx, wrap });
             Some(d.participants.len() - 1)
         }
     }
@@ -248,6 +258,7 @@ fn ensure_participant(id: &str, is_actor: bool, d: &mut SequenceDiagram) -> usiz
         label: id.to_string(),
         is_actor,
         box_idx: None,
+        wrap: false,
     });
     d.participants.len() - 1
 }

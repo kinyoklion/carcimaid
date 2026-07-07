@@ -455,6 +455,9 @@ pub struct Participant {
     /// Index into [`SequenceDiagram::boxes`] if this participant is inside a
     /// `box … end` grouping.
     pub box_idx: Option<usize>,
+    /// `wrap:` directive on the label — wrap it to the actor width (growing the
+    /// box height) rather than widening the box to one line.
+    pub wrap: bool,
 }
 
 /// One entry in the sequence's ordered event stream.

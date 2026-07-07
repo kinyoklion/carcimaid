@@ -36,7 +36,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     // Lifeline runs from the bottom of the (possibly created-and-lowered) top
     // box to the actor's stopy (bottom, or the destroy point).
     let lifeline_y1 = |a: &crate::layout::sequence::PlacedActor| {
-        a.starty + if a.is_actor { ACTOR_GLYPH_H } else { s.actor_height }
+        a.starty + if a.is_actor { ACTOR_GLYPH_H } else { a.height }
     };
 
     // 0a. Participant `box` groupings (drawn behind everything, lowered to front).
@@ -93,7 +93,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         if a.is_actor {
             out.push_str("<g></g>");
         } else {
-            actor_box(&mut out, a.cx(), a.x, fy, a.width, s.actor_height, &a.label, &a.id, false);
+            actor_box(&mut out, a.cx(), a.x, fy, a.width, a.height, &a.label_lines, &a.id, false);
         }
     }
     // 2. Top actors with lifelines, reverse participant order (id carries the
@@ -122,7 +122,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
                 i = i,
                 id = esc(&a.id),
             );
-            actor_box(&mut out, cx, a.x, a.starty, a.width, s.actor_height, &a.label, &a.id, true);
+            actor_box(&mut out, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
             out.push_str("</g>");
         }
         out.push_str("</g>");
@@ -142,7 +142,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     //     last actor index (n-1) for every bottom glyph (mermaid freezes its
     //     `actorCnt` during the footer pass).
     for (i, a) in s.actors.iter().enumerate().filter(|(_, a)| a.is_actor) {
-        actor_glyph(&mut out, a.cx(), a.starty, &a.label, &a.id, true, i);
+        actor_glyph(&mut out, a.cx(), a.starty, &a.label_lines, &a.id, true, i);
     }
 
     // 7. Notes and control-structure boxes, in event order (both precede all
@@ -168,7 +168,7 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     let last = s.actors.len().saturating_sub(1);
     for a in s.actors.iter().filter(|a| a.is_actor) {
         let fy = if a.destroyed { a.stopy } else { s.bottom_y };
-        actor_glyph(&mut out, a.cx(), fy, &a.label, &a.id, false, last);
+        actor_glyph(&mut out, a.cx(), fy, &a.label_lines, &a.id, false, last);
     }
 
     // 8. Title.
@@ -191,7 +191,7 @@ const ACTOR_GLYPH_H: f64 = 80.0;
 
 /// Emit an `actor`-type stick-figure glyph (head/torso/arms/legs + label),
 /// matching mermaid's `drawActorTypeActor`. `top` selects the top/bottom class.
-fn actor_glyph(out: &mut String, cx: f64, y: f64, label: &str, id: &str, top: bool, n_idx: usize) {
+fn actor_glyph(out: &mut String, cx: f64, y: f64, lines: &[String], id: &str, top: bool, n_idx: usize) {
     let class = if top { "actor-man actor-top" } else { "actor-man actor-bottom" };
     // The `data-*` participant attrs are only on the top glyph.
     let data = if top {
@@ -230,7 +230,7 @@ fn actor_glyph(out: &mut String, cx: f64, y: f64, label: &str, id: &str, top: bo
         cx = n(cx),
         cy = n(y + 10.0),
     );
-    actor_label(out, cx, y + 67.5, label, "actor actor-man");
+    actor_label(out, cx, y + 67.5, lines, "actor actor-man");
     out.push_str("</g>");
 }
 
@@ -244,7 +244,7 @@ fn actor_box(
     y: f64,
     w: f64,
     h: f64,
-    label: &str,
+    lines: &[String],
     id: &str,
     top: bool,
 ) {
@@ -265,7 +265,7 @@ fn actor_box(
         name = esc(id),
         class = class,
     );
-    actor_label(out, cx, y + h / 2.0, label, "actor actor-box");
+    actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
     if !top {
         out.push_str("</g>");
     }
@@ -274,8 +274,7 @@ fn actor_box(
 /// Emit an actor/participant label (`byTspan`): one `<text>` per `<br>` line,
 /// all at the box centre `cy`, with each `<tspan>` vertically centred via
 /// `dy = i*16 - 16*(lines-1)/2`.
-fn actor_label(out: &mut String, cx: f64, cy: f64, label: &str, class: &str) {
-    let lines = split_lines(label);
+fn actor_label(out: &mut String, cx: f64, cy: f64, lines: &[String], class: &str) {
     let count = lines.len().max(1) as f64;
     for (i, line) in lines.iter().enumerate() {
         let dy = i as f64 * 16.0 - 16.0 * (count - 1.0) / 2.0;

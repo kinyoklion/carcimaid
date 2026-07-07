@@ -67,6 +67,10 @@ pub struct PlacedActor {
     /// Left edge of the actor box.
     pub x: f64,
     pub width: f64,
+    /// Box height (`ACTOR_HEIGHT`, or taller for a wrapped multi-line label).
+    pub height: f64,
+    /// Label display lines (wrapped / `<br>`-split).
+    pub label_lines: Vec<String>,
     /// Top-box y. `top_y` normally; for a `create`d actor, the y of the message
     /// that introduces it (box centred on that line).
     pub starty: f64,
@@ -466,13 +470,52 @@ fn has_end_marker(arrow: SeqArrow) -> bool {
 
 /// Lay out a sequence diagram.
 pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
-    // 1. Actor widths from label measurement (≥ conf.width).
+    let n = d.participants.len();
+    // 1. Actor label lines, widths, and heights. A wrapped label uses the fixed
+    //    width and grows the box height; an unwrapped one widens to its widest
+    //    `<br>` line and stays one row tall.
+    let actor_lines: Vec<Vec<String>> = d
+        .participants
+        .iter()
+        .map(|p| {
+            if p.wrap {
+                crate::text::wrap_label(&p.label, ACTOR_WIDTH - 2.0 * WRAP_PADDING, LABEL_FONT)
+                    .iter()
+                    .map(|w| crate::text::decode_entities(&w.join(" ")))
+                    .collect()
+            } else {
+                split_lines(&p.label)
+            }
+        })
+        .collect();
     let widths: Vec<f64> = d
         .participants
         .iter()
-        .map(|p| ACTOR_WIDTH.max(label_width(&p.label, LABEL_FONT) + 2.0 * WRAP_PADDING))
+        .enumerate()
+        .map(|(i, p)| {
+            if p.wrap {
+                ACTOR_WIDTH
+            } else {
+                let w = actor_lines[i]
+                    .iter()
+                    .map(|l| label_width(l, LABEL_FONT))
+                    .fold(0.0_f64, f64::max);
+                ACTOR_WIDTH.max(w + 2.0 * WRAP_PADDING)
+            }
+        })
         .collect();
-    let n = d.participants.len();
+    let heights: Vec<f64> = d
+        .participants
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if p.wrap {
+                (actor_lines[i].len() as f64 * SEQ_LINE_HEIGHT).max(ACTOR_HEIGHT)
+            } else {
+                ACTOR_HEIGHT
+            }
+        })
+        .collect();
 
     // 2. Widest message label between each adjacent actor pair (left-actor key).
     //    Only adjacent pairs widen spacing (mermaid's getMaxMessageWidthPerActor).
@@ -566,6 +609,8 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
             is_actor: p.is_actor,
             x: xs[i],
             width: widths[i],
+            height: heights[i],
+            label_lines: actor_lines[i].clone(),
             starty: 0.0, // set to top_y below
             stopy: 0.0,  // set to bottom_y after the walk
             created: false,
@@ -573,7 +618,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         })
         .collect();
 
-    let max_actor_h = ACTOR_HEIGHT; // single-line labels for now
+    let max_actor_h = heights.iter().cloned().fold(ACTOR_HEIGHT, f64::max);
     // A participant `box` reserves space above the actors for its label, so the
     // whole diagram shifts down by boxMargin + label height when boxes exist.
     let has_boxes = box_seen.iter().any(|&s| s);
