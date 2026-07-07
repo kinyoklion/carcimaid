@@ -450,7 +450,18 @@ fn note_lines(note: &crate::ir::SeqNote, width: f64) -> Vec<String> {
 /// back from the actor centre to seat the marker). Open arrows (`->`, `-->`)
 /// draw no marker and reach the centre.
 fn has_end_marker(arrow: SeqArrow) -> bool {
-    !matches!(arrow, SeqArrow::SolidOpen | SeqArrow::DottedOpen)
+    // Only solid/filled heads pull the stop endpoint back by 3. Open arrows,
+    // stick (open-line) directional heads, and reverse arrows (head at source)
+    // reach the actor centre.
+    !matches!(
+        arrow,
+        SeqArrow::SolidOpen
+            | SeqArrow::DottedOpen
+            | SeqArrow::StickTop
+            | SeqArrow::StickBottom
+            | SeqArrow::StickTopDotted
+            | SeqArrow::StickBottomDotted
+    ) && !arrow.is_reverse()
 }
 
 /// Lay out a sequence diagram.
@@ -683,8 +694,16 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     if has_end_marker(m.arrow) {
                         ex += if l2r { -3.0 } else { 3.0 };
                     }
-                    // Bidirectional arrows have a head at the source too.
-                    if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) {
+                    // Bidirectional and *solid* reverse arrows have a filled head
+                    // at the source (pull it back); stick reverse heads don't.
+                    let solid_rev = matches!(
+                        m.arrow,
+                        SeqArrow::SolidTopRev
+                            | SeqArrow::SolidBottomRev
+                            | SeqArrow::SolidTopRevDotted
+                            | SeqArrow::SolidBottomRevDotted
+                    );
+                    if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) || solid_rev {
                         sx += if l2r { 3.0 } else { -3.0 };
                     }
                     start_x = sx;

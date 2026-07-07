@@ -476,10 +476,19 @@ fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequenc
         Some(mk) => format!(r#" marker-end="url(#{ID}-{mk})""#),
         None => String::new(),
     };
-    let marker_start = if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) {
-        format!(r#" marker-start="url(#{ID}-arrowhead)""#)
-    } else {
-        String::new()
+    let start_marker = match m.arrow {
+        SeqArrow::BiSolid | SeqArrow::BiDotted => Some("arrowhead"),
+        // Reverse directional arrows put the head at the source (the opposite
+        // top/bottom head).
+        SeqArrow::SolidTopRev | SeqArrow::SolidTopRevDotted => Some("solidBottomArrowHead"),
+        SeqArrow::SolidBottomRev | SeqArrow::SolidBottomRevDotted => Some("solidTopArrowHead"),
+        SeqArrow::StickTopRev | SeqArrow::StickTopRevDotted => Some("stickBottomArrowHead"),
+        SeqArrow::StickBottomRev | SeqArrow::StickBottomRevDotted => Some("stickTopArrowHead"),
+        _ => None,
+    };
+    let marker_start = match start_marker {
+        Some(mk) => format!(r#" marker-start="url(#{ID}-{mk})""#),
+        None => String::new(),
     };
     if m.self_loop {
         // Cubic loop bulging right: M sx,Y C sx+60,Y-10 sx+60,Y+30 sx,Y+20.
@@ -563,7 +572,22 @@ fn end_marker_id(arrow: SeqArrow) -> Option<&'static str> {
         }
         SeqArrow::SolidCross | SeqArrow::DottedCross => Some("crosshead"),
         SeqArrow::SolidPoint | SeqArrow::DottedPoint => Some("filled-head"),
-        SeqArrow::SolidOpen | SeqArrow::DottedOpen => None,
+        // Directional (non-reverse) arrows point at the target.
+        SeqArrow::SolidTop | SeqArrow::SolidTopDotted => Some("solidTopArrowHead"),
+        SeqArrow::SolidBottom | SeqArrow::SolidBottomDotted => Some("solidBottomArrowHead"),
+        SeqArrow::StickTop | SeqArrow::StickTopDotted => Some("stickTopArrowHead"),
+        SeqArrow::StickBottom | SeqArrow::StickBottomDotted => Some("stickBottomArrowHead"),
+        // Open + reverse directional arrows draw no end marker.
+        SeqArrow::SolidOpen
+        | SeqArrow::DottedOpen
+        | SeqArrow::SolidTopRev
+        | SeqArrow::SolidBottomRev
+        | SeqArrow::SolidTopRevDotted
+        | SeqArrow::SolidBottomRevDotted
+        | SeqArrow::StickTopRev
+        | SeqArrow::StickBottomRev
+        | SeqArrow::StickTopRevDotted
+        | SeqArrow::StickBottomRevDotted => None,
     }
 }
 

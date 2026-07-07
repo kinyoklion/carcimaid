@@ -555,9 +555,43 @@ pub enum SeqArrow {
     BiSolid,
     /// `<<-->>` — dotted line, filled heads both ends (bidirectional).
     BiDotted,
+    // Directional (solid-triangle) arrows: `-|\` top, `-|/` bottom, `/|-` and
+    // `\|-` their reverse (head at source); `--|…`/`…|--` are the dotted forms.
+    SolidTop,
+    SolidBottom,
+    SolidTopRev,
+    SolidBottomRev,
+    SolidTopDotted,
+    SolidBottomDotted,
+    SolidTopRevDotted,
+    SolidBottomRevDotted,
+    // Stick (open-line head) directional arrows: `-\` top, `-//` bottom, `//-`
+    // and `\\-` their reverse; `--…`/`…--` the dotted forms.
+    StickTop,
+    StickBottom,
+    StickTopRev,
+    StickBottomRev,
+    StickTopDotted,
+    StickBottomDotted,
+    StickTopRevDotted,
+    StickBottomRevDotted,
 }
 
 impl SeqArrow {
+    /// `true` for a reverse directional arrow (head at the source end).
+    pub fn is_reverse(self) -> bool {
+        matches!(
+            self,
+            SeqArrow::SolidTopRev
+                | SeqArrow::SolidBottomRev
+                | SeqArrow::SolidTopRevDotted
+                | SeqArrow::SolidBottomRevDotted
+                | SeqArrow::StickTopRev
+                | SeqArrow::StickBottomRev
+                | SeqArrow::StickTopRevDotted
+                | SeqArrow::StickBottomRevDotted
+        )
+    }
     /// `true` if the line is dotted (rendered with a dash pattern).
     pub fn is_dotted(self) -> bool {
         matches!(
@@ -567,6 +601,14 @@ impl SeqArrow {
                 | SeqArrow::DottedCross
                 | SeqArrow::DottedPoint
                 | SeqArrow::BiDotted
+                | SeqArrow::SolidTopDotted
+                | SeqArrow::SolidBottomDotted
+                | SeqArrow::SolidTopRevDotted
+                | SeqArrow::SolidBottomRevDotted
+                | SeqArrow::StickTopDotted
+                | SeqArrow::StickBottomDotted
+                | SeqArrow::StickTopRevDotted
+                | SeqArrow::StickBottomRevDotted
         )
     }
 }
