@@ -193,17 +193,8 @@ fn actor_glyph(out: &mut String, cx: f64, y: f64, label: &str, id: &str, top: bo
         cx = n(cx),
         cy = n(y + 10.0),
     );
-    let _ = write!(
-        out,
-        concat!(
-            r#"<text x="{cx}" y="{ty}" dominant-baseline="central" alignment-baseline="central" "#,
-            r#"class="actor actor-man" style="text-anchor: middle; font-size: 16px; font-weight: 400;">"#,
-            r#"<tspan x="{cx}" dy="0">{t}</tspan></text></g>"#,
-        ),
-        cx = n(cx),
-        ty = n(y + 67.5),
-        t = esc(label),
-    );
+    actor_label(out, cx, y + 67.5, label, "actor actor-man");
+    out.push_str("</g>");
 }
 
 /// Emit an actor box rect + centred label. `top` selects the top vs bottom
@@ -237,18 +228,33 @@ fn actor_box(
         name = esc(id),
         class = class,
     );
-    let _ = write!(
-        out,
-        concat!(
-            r#"<text x="{cx}" y="{ty}" dominant-baseline="central" alignment-baseline="central" "#,
-            r#"class="actor actor-box" style="text-anchor: middle; font-size: 16px; font-weight: 400;">"#,
-        ),
-        cx = n(cx),
-        ty = n(y + h / 2.0),
-    );
-    let _ = write!(out, r#"<tspan x="{cx}" dy="0">{label}</tspan></text>"#, cx = n(cx), label = esc(label));
+    actor_label(out, cx, y + h / 2.0, label, "actor actor-box");
     if !top {
         out.push_str("</g>");
+    }
+}
+
+/// Emit an actor/participant label (`byTspan`): one `<text>` per `<br>` line,
+/// all at the box centre `cy`, with each `<tspan>` vertically centred via
+/// `dy = i*16 - 16*(lines-1)/2`.
+fn actor_label(out: &mut String, cx: f64, cy: f64, label: &str, class: &str) {
+    let lines = split_lines(label);
+    let count = lines.len().max(1) as f64;
+    for (i, line) in lines.iter().enumerate() {
+        let dy = i as f64 * 16.0 - 16.0 * (count - 1.0) / 2.0;
+        let _ = write!(
+            out,
+            concat!(
+                r#"<text x="{cx}" y="{cy}" dominant-baseline="central" alignment-baseline="central" "#,
+                r#"class="{class}" style="text-anchor: middle; font-size: 16px; font-weight: 400;">"#,
+                r#"<tspan x="{cx}" dy="{dy}">{t}</tspan></text>"#,
+            ),
+            cx = n(cx),
+            cy = n(cy),
+            class = class,
+            dy = n(dy),
+            t = esc(line),
+        );
     }
 }
 
@@ -384,34 +390,42 @@ fn note_box(out: &mut String, note: &crate::layout::sequence::PlacedNote) {
         w = n(note.width),
         h = n(note.height),
     );
-    let _ = write!(
-        out,
-        concat!(
-            r#"<text x="{cx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" "#,
-            r#"alignment-baseline="middle" class="noteText" dy="1em" "#,
-            r#"style="font-size: 16px; font-weight: 400;"><tspan x="{cx}">{t}</tspan></text></g>"#,
-        ),
-        cx = n(cx),
-        ty = n(note.y + 5.0),
-        t = esc(&note.text),
-    );
+    // One `<text>` (with a `<tspan>`) per `<br>`-separated line, stepping y.
+    for (i, line) in split_lines(&note.text).iter().enumerate() {
+        let _ = write!(
+            out,
+            concat!(
+                r#"<text x="{cx}" y="{ty}" text-anchor="middle" dominant-baseline="middle" "#,
+                r#"alignment-baseline="middle" class="noteText" dy="1em" "#,
+                r#"style="font-size: 16px; font-weight: 400;"><tspan x="{cx}">{t}</tspan></text>"#,
+            ),
+            cx = n(cx),
+            ty = n(note.y + 5.0 + i as f64 * SEQ_LINE_H),
+            t = esc(line),
+        );
+    }
+    out.push_str("</g>");
 }
 
 /// Emit one message: label `<text>`, arrow `<line>`, and autonumber elements.
 fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequence::PlacedActor]) {
     let (lo, hi) = (m.start_x.min(m.stop_x), m.start_x.max(m.stop_x));
     let text_x = (lo + (hi - lo) / 2.0).round();
-    let _ = write!(
-        out,
-        concat!(
-            r#"<text x="{x}" y="{y}" text-anchor="middle" dominant-baseline="middle" "#,
-            r#"alignment-baseline="middle" style="font-size: 16px; font-weight: 400;" "#,
-            r#"class="messageText" dy="1em">{t}</text>"#,
-        ),
-        x = n(text_x),
-        y = n(m.text_y),
-        t = esc(&m.text),
-    );
+    // One `<text>` per `<br>`-separated line, stepping y (mermaid uses separate
+    // texts for messageText, not tspans).
+    for (i, line) in split_lines(&m.text).iter().enumerate() {
+        let _ = write!(
+            out,
+            concat!(
+                r#"<text x="{x}" y="{y}" text-anchor="middle" dominant-baseline="middle" "#,
+                r#"alignment-baseline="middle" style="font-size: 16px; font-weight: 400;" "#,
+                r#"class="messageText" dy="1em">{t}</text>"#,
+            ),
+            x = n(text_x),
+            y = n(m.text_y + i as f64 * SEQ_LINE_H),
+            t = esc(line),
+        );
+    }
 
     let dotted = m.arrow.is_dotted();
     let class = if dotted { "messageLine1" } else { "messageLine0" };
@@ -497,6 +511,19 @@ fn end_marker_id(arrow: SeqArrow) -> Option<&'static str> {
 /// comparison ignores `<style>` text.
 fn style_block() -> String {
     format!("<style>{}</style>", seq_defs::SEQ_STYLE)
+}
+
+/// Per-line height for stacked multi-line labels (mermaid's rounded bbox at 16px).
+const SEQ_LINE_H: f64 = 19.0;
+
+/// Split a label on `<br>`/`<br/>`/newlines into display lines.
+fn split_lines(text: &str) -> Vec<String> {
+    text.replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("<br>", "\n")
+        .split('\n')
+        .map(|s| s.trim().to_string())
+        .collect()
 }
 
 /// Format a coordinate: integers without a decimal point, else trimmed to 3dp
