@@ -188,7 +188,8 @@ pub struct PlacedNote {
     pub y: f64,
     pub width: f64,
     pub height: f64,
-    pub text: String,
+    /// Display lines (already wrapped / `<br>`-split / entity-decoded).
+    pub lines: Vec<String>,
 }
 
 /// A message arrow with its computed endpoints and label position.
@@ -420,9 +421,28 @@ fn note_geometry(note: &crate::ir::SeqNote, actors: &[PlacedActor]) -> (f64, f64
             (startx, width)
         }
         NotePlacement::Over => {
-            let width = a.width.max(ACTOR_WIDTH).max(text_w + 2.0 * NOTE_MARGIN);
+            // A wrapped note uses the fixed width (actor/conf.width) and wraps
+            // the text to it; an unwrapped one grows to the (one-line) text.
+            let width = if note.wrap {
+                a.width.max(ACTOR_WIDTH)
+            } else {
+                a.width.max(ACTOR_WIDTH).max(text_w + 2.0 * NOTE_MARGIN)
+            };
             (a.x + (a.width - width) / 2.0, width)
         }
+    }
+}
+
+/// The display lines of a note: wrapped to `width` when `note.wrap`, else split
+/// on `<br>`. Returns lines (entity-decoded).
+fn note_lines(note: &crate::ir::SeqNote, width: f64) -> Vec<String> {
+    if note.wrap {
+        crate::text::wrap_label(&note.text, width - 2.0 * WRAP_PADDING, LABEL_FONT)
+            .iter()
+            .map(|words| crate::text::decode_entities(&words.join(" ")))
+            .collect()
+    } else {
+        split_lines(&note.text)
     }
 }
 
@@ -448,8 +468,14 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     let mut max_msg_w = vec![0.0_f64; n.max(1)];
     for ev in &d.events {
         if let SeqEvent::Message(m) = ev {
-            let mw = text::measure_width(&split_lines(&m.text).join(" "), LABEL_FONT)
-                + 2.0 * WRAP_PADDING;
+            // A wrapped message contributes only conf.width; an unwrapped one
+            // contributes its *widest* `<br>` line (not the joined text).
+            let raw = if m.wrap {
+                ACTOR_WIDTH
+            } else {
+                label_width(&m.text, LABEL_FONT)
+            };
+            let mw = raw + 2.0 * WRAP_PADDING;
             let (lo, hi) = (m.from.min(m.to), m.from.max(m.to));
             if m.from == m.to {
                 max_msg_w[lo] = max_msg_w[lo].max(mw / 2.0);
@@ -592,8 +618,9 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 cursor += BOX_MARGIN; // bumpVerticalPos(boxMargin)
                 let starty = cursor;
                 let (nx, nw) = note_geometry(note, &actors);
-                let lines = split_lines(&note.text).len().max(1) as f64;
-                let height = lines * SEQ_LINE_HEIGHT + 2.0 * NOTE_MARGIN;
+                let lines = note_lines(note, nw);
+                let n_lines = lines.len().max(1) as f64;
+                let height = n_lines * SEQ_LINE_HEIGHT + 2.0 * NOTE_MARGIN;
                 cursor += height;
                 expand_open(&mut open, nx, nx + nw, starty + height);
                 notes.push(PlacedNote {
@@ -602,11 +629,25 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     y: starty,
                     width: nw,
                     height,
-                    text: note.text.clone(),
+                    lines,
                 });
             }
             SeqEvent::Message(m) => {
-                let lines = split_lines(&m.text).len().max(1) as f64;
+                // A wrapped message wraps to the space between its actors (the
+                // spacing already reserved conf.width); the display text carries
+                // the resulting `\n` breaks (render splits on them).
+                let disp_text = if m.wrap {
+                    let span = (actors[m.from].cx() - actors[m.to].cx()).abs();
+                    let w = (span - 2.0 * WRAP_PADDING).max(ACTOR_WIDTH - 2.0 * WRAP_PADDING);
+                    crate::text::wrap_label(&m.text, w, LABEL_FONT)
+                        .iter()
+                        .map(|words| crate::text::decode_entities(&words.join(" ")))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    m.text.clone()
+                };
+                let lines = split_lines(&disp_text).len().max(1) as f64;
                 let text_h = lines * SEQ_LINE_HEIGHT;
                 let line_height = SEQ_LINE_HEIGHT;
                 let c = cursor;
@@ -699,7 +740,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     id: eid,
                     from: m.from,
                     to: m.to,
-                    text: m.text.clone(),
+                    text: disp_text,
                     arrow: m.arrow,
                     line_y,
                     text_y,

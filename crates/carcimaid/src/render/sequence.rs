@@ -427,8 +427,8 @@ fn note_box(out: &mut String, note: &crate::layout::sequence::PlacedNote) {
         w = n(note.width),
         h = n(note.height),
     );
-    // One `<text>` (with a `<tspan>`) per `<br>`-separated line, stepping y.
-    for (i, line) in split_lines(&note.text).iter().enumerate() {
+    // One `<text>` (with a `<tspan>`) per display line, stepping y.
+    for (i, line) in note.lines.iter().enumerate() {
         let _ = write!(
             out,
             concat!(

@@ -299,10 +299,19 @@ fn parse_note(rest: &str, d: &mut SequenceDiagram) {
     } else {
         return;
     };
-    let (actors_str, text) = match after.split_once(':') {
+    let (actors_str, mut text) = match after.split_once(':') {
         Some((a, t)) => (a.trim(), t.trim().to_string()),
         None => (after.trim(), String::new()),
     };
+    // A leading `wrap:` / `nowrap:` is a directive (from `Note over X:wrap: …`),
+    // not part of the text.
+    let mut wrap = false;
+    if let Some(t) = text.strip_prefix("wrap:") {
+        wrap = true;
+        text = t.trim().to_string();
+    } else if let Some(t) = text.strip_prefix("nowrap:") {
+        text = t.trim().to_string();
+    }
     let actors: Vec<usize> = actors_str
         .split(',')
         .map(|a| ensure_participant(a.trim(), false, d))
@@ -310,7 +319,7 @@ fn parse_note(rest: &str, d: &mut SequenceDiagram) {
     if actors.is_empty() {
         return;
     }
-    d.events.push(SeqEvent::Note(SeqNote { placement, actors, text }));
+    d.events.push(SeqEvent::Note(SeqNote { placement, actors, text, wrap }));
 }
 
 /// Parse a message statement: `LHS <arrow>[+/-] RHS : text`.
@@ -332,10 +341,18 @@ fn parse_message(stmt: &str, d: &mut SequenceDiagram) {
         rhs = r;
     }
 
-    let (to_str, text) = match rhs.split_once(':') {
+    let (to_str, mut text) = match rhs.split_once(':') {
         Some((t, msg)) => (t.trim(), msg.trim().to_string()),
         None => (rhs.trim(), String::new()),
     };
+    // A leading `wrap:` / `nowrap:` is a directive, not part of the label.
+    let mut wrap = false;
+    if let Some(t) = text.strip_prefix("wrap:") {
+        wrap = true;
+        text = t.trim().to_string();
+    } else if let Some(t) = text.strip_prefix("nowrap:") {
+        text = t.trim().to_string();
+    }
     if from_str.is_empty() || to_str.is_empty() {
         return;
     }
@@ -348,6 +365,7 @@ fn parse_message(stmt: &str, d: &mut SequenceDiagram) {
         arrow,
         activate,
         deactivate,
+        wrap,
     }));
 }
 

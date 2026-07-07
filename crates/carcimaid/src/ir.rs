@@ -490,6 +490,8 @@ pub struct SeqMessage {
     /// `+`/`-` activation suffix: activate the target / deactivate the source.
     pub activate: bool,
     pub deactivate: bool,
+    /// `:wrap:` directive — wrap the label to the actor width.
+    pub wrap: bool,
 }
 
 /// A note attached to one or more participants.
@@ -500,6 +502,8 @@ pub struct SeqNote {
     /// for `over`).
     pub actors: Vec<usize>,
     pub text: String,
+    /// `:wrap:` directive — wrap the text to the note width (vs one line).
+    pub wrap: bool,
 }
 
 /// Where a note sits relative to its participant(s).
