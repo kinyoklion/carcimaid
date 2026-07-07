@@ -516,13 +516,14 @@ fn style_block() -> String {
 /// Per-line height for stacked multi-line labels (mermaid's rounded bbox at 16px).
 const SEQ_LINE_H: f64 = 19.0;
 
-/// Split a label on `<br>`/`<br/>`/newlines into display lines.
+/// Split a label on `<br>`/`<br/>`/newlines into display lines, then decode
+/// mermaid's `#…;` entity escapes per line.
 fn split_lines(text: &str) -> Vec<String> {
     text.replace("<br/>", "\n")
         .replace("<br />", "\n")
         .replace("<br>", "\n")
         .split('\n')
-        .map(|s| s.trim().to_string())
+        .map(|s| crate::text::decode_entities(s.trim()))
         .collect()
 }
 

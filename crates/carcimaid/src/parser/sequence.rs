@@ -57,9 +57,10 @@ fn split_statements(source: &str) -> Vec<String> {
             Some(i) => &line[..i],
             None => line,
         };
-        for part in line.split(';') {
-            out.push(part.to_string());
-        }
+        // Sequence statements are newline-terminated (unlike flowchart, `;` is
+        // not a separator — splitting on it would break `#lt;`-style entity
+        // escapes and any label containing a semicolon).
+        out.push(line.to_string());
     }
     out
 }

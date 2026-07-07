@@ -137,6 +137,56 @@ pub fn line_width(words: &[String], font_size: f64) -> f64 {
     measure_width(&words.join(" "), font_size)
 }
 
+/// Decode mermaid's `#…;` entity escapes in label text (`#lt;`→`<`,
+/// `#gt;`→`>`, `#quot;`→`"`, `#amp;`→`&`, named HTML entities, and numeric
+/// `#NNN;` base-10 char codes). Unknown codes are left as-is. mermaid lets
+/// authors escape characters this way (e.g. `#quot;`, `#35;` for `#`).
+pub fn decode_entities(s: &str) -> String {
+    if !s.contains('#') {
+        return s.to_string();
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if bytes[i] == b'#' {
+            // Find the terminating `;` within a short window.
+            if let Some(rel) = s[i + 1..].find(';') {
+                let code = &s[i + 1..i + 1 + rel];
+                if let Some(c) = entity_char(code) {
+                    out.push(c);
+                    i += 1 + rel + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Resolve a mermaid entity body (without the `#`/`;`) to a character.
+fn entity_char(code: &str) -> Option<char> {
+    if let Ok(n) = code.parse::<u32>() {
+        return char::from_u32(n); // base-10 numeric, e.g. `#35;` -> '#'
+    }
+    Some(match code {
+        "lt" => '<',
+        "gt" => '>',
+        "amp" => '&',
+        "quot" => '"',
+        "apos" => '\'',
+        "semi" => ';',
+        "colon" => ':',
+        "nbsp" => ' ',
+        "hash" | "num" => '#',
+        "equals" => '=',
+        _ => return None,
+    })
+}
+
 /// Line height in px at `font_size`, from the font's ascent/descent/line-gap.
 pub fn line_height(font_size: f64) -> f64 {
     let face = face();
@@ -169,5 +219,15 @@ mod tests {
         assert!(a > 0.0 && b > a, "expected W wider than i: {a} vs {b}");
         // Empty string measures to zero.
         assert_eq!(measure_width("", 16.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod decode_tests {
+    #[test]
+    fn decodes_mermaid_entities() {
+        assert_eq!(super::decode_entities("using #lt;br#gt;"), "using <br>");
+        assert_eq!(super::decode_entities("#35;x#quot;"), "#x\"");
+        assert_eq!(super::decode_entities("plain"), "plain");
     }
 }

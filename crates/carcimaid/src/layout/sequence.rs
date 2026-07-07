@@ -212,7 +212,7 @@ fn split_lines(text: &str) -> Vec<String> {
         .replace("<br />", "\n")
         .replace("<br>", "\n")
         .split('\n')
-        .map(|s| s.trim().to_string())
+        .map(|s| crate::text::decode_entities(s.trim()))
         .collect()
 }
 
