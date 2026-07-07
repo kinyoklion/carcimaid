@@ -444,6 +444,32 @@ fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequenc
     } else {
         String::new()
     };
+    if m.self_loop {
+        // Cubic loop bulging right: M sx,Y C sx+60,Y-10 sx+60,Y+30 sx,Y+20.
+        let sx = m.start_x;
+        let y = m.line_y;
+        let _ = write!(
+            out,
+            concat!(
+                r#"<path d="M {sx},{y} C {c1x},{y1} {c1x},{y2} {sx},{y3}" class="{class}" "#,
+                r#"data-et="message" data-id="i{idx}" data-from="{from}" data-to="{to}" "#,
+                r#"stroke-width="2" stroke="none"{me}{style}/>"#,
+            ),
+            sx = n(sx),
+            y = n(y),
+            c1x = n(sx + 60.0),
+            y1 = n(y - 10.0),
+            y2 = n(y + 30.0),
+            y3 = n(y + 20.0),
+            class = class,
+            idx = m.id,
+            from = esc(&actors[m.from].id),
+            to = esc(&actors[m.to].id),
+            me = marker_end,
+            style = style,
+        );
+        return;
+    }
     let _ = write!(
         out,
         concat!(

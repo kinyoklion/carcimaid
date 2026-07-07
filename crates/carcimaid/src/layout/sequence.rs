@@ -194,6 +194,8 @@ pub struct PlacedMessage {
     pub text_y: f64,
     pub start_x: f64,
     pub stop_x: f64,
+    /// A self-message (`from == to`), drawn as a cubic loop path.
+    pub self_loop: bool,
     /// Autonumber index, if numbering is active for this message.
     pub seq_num: Option<i64>,
 }
@@ -519,7 +521,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 let c = cursor;
                 let line_y = c + line_height + text_h + BOX_MARGIN;
                 let text_y = (c + 15.0).round();
-                cursor = line_y;
+                let self_loop = m.from == m.to;
 
                 // A `+` suffix activates the target *before* the line is placed,
                 // so the arrow already lands on the new bar's edge (phantom
@@ -533,16 +535,31 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 // no-activation case): near edge of source, far edge of target.
                 let (fl, fr) = acts.bounds(m.from, &actors);
                 let (tl, tr) = acts.bounds(m.to, &actors);
-                let l2r = fl <= tl;
-                let mut start_x = if l2r { fr } else { fl };
-                let mut stop_x = if l2r { tl } else { tr };
-                if has_end_marker(m.arrow) {
-                    stop_x += if l2r { -3.0 } else { 3.0 };
-                }
-                // Bidirectional arrows have a head at the source too, so the
-                // start is pulled in by 3 as well.
-                if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) {
-                    start_x += if l2r { 3.0 } else { -3.0 };
+                let (start_x, stop_x, exp_lo, exp_hi);
+                if self_loop {
+                    // Self-message: a cubic loop bulging right to cx+61. The
+                    // cursor advances 30 past the line (for the loop's height).
+                    start_x = fr; // cx + 1 (or bar edge)
+                    stop_x = fr;
+                    exp_lo = fl;
+                    exp_hi = fr + 61.0;
+                    cursor = line_y + 30.0;
+                } else {
+                    let l2r = fl <= tl;
+                    let mut sx = if l2r { fr } else { fl };
+                    let mut ex = if l2r { tl } else { tr };
+                    if has_end_marker(m.arrow) {
+                        ex += if l2r { -3.0 } else { 3.0 };
+                    }
+                    // Bidirectional arrows have a head at the source too.
+                    if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) {
+                        sx += if l2r { 3.0 } else { -3.0 };
+                    }
+                    start_x = sx;
+                    stop_x = ex;
+                    exp_lo = fl.min(tl);
+                    exp_hi = fr.max(tr);
+                    cursor = line_y;
                 }
 
                 // A `-` suffix ends the source's bar at this line.
@@ -557,8 +574,8 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 }
 
                 // Loop bounds span the involved actors' outer edges (activation
-                // bounds), not the arrowhead-adjusted endpoints.
-                expand_open(&mut open, fl.min(tl), fr.max(tr), line_y);
+                // bounds) / the self-loop bulge, not the adjusted endpoints.
+                expand_open(&mut open, exp_lo, exp_hi, cursor);
                 messages.push(PlacedMessage {
                     id: eid,
                     from: m.from,
@@ -569,6 +586,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     text_y,
                     start_x,
                     stop_x,
+                    self_loop,
                     seq_num,
                 });
             }
@@ -602,6 +620,12 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     for r in &rects {
         box_startx = box_startx.min(r.x);
         box_stopx = box_stopx.max(r.x + r.w);
+    }
+    for m in &messages {
+        // Self-loops bulge right to start_x + 61.
+        let hi = if m.self_loop { m.start_x + 61.0 } else { m.start_x.max(m.stop_x) };
+        box_startx = box_startx.min(m.start_x.min(m.stop_x));
+        box_stopx = box_stopx.max(hi);
     }
     let box_starty = top_y;
     let box_stopy = cursor;
