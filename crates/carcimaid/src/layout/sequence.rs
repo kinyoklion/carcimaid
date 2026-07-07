@@ -403,11 +403,11 @@ fn note_geometry(note: &crate::ir::SeqNote, actors: &[PlacedActor]) -> (f64, f64
     let a = &actors[note.actors[0]];
     match note.placement {
         NotePlacement::RightOf => {
-            let width = a.width.max(text_w + 2.0 * NOTE_MARGIN);
+            let width = if note.wrap { ACTOR_WIDTH } else { a.width.max(text_w + 2.0 * NOTE_MARGIN) };
             (a.x + (a.width + ACTOR_MARGIN) / 2.0, width)
         }
         NotePlacement::LeftOf => {
-            let width = a.width.max(text_w + 2.0 * NOTE_MARGIN);
+            let width = if note.wrap { ACTOR_WIDTH } else { a.width.max(text_w + 2.0 * NOTE_MARGIN) };
             (a.x - width + (a.width - ACTOR_MARGIN) / 2.0, width)
         }
         NotePlacement::Over if note.actors.len() >= 2 => {
