@@ -539,7 +539,11 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                 if has_end_marker(m.arrow) {
                     stop_x += if l2r { -3.0 } else { 3.0 };
                 }
-                let _ = &mut start_x;
+                // Bidirectional arrows have a head at the source too, so the
+                // start is pulled in by 3 as well.
+                if matches!(m.arrow, SeqArrow::BiSolid | SeqArrow::BiDotted) {
+                    start_x += if l2r { 3.0 } else { -3.0 };
+                }
 
                 // A `-` suffix ends the source's bar at this line.
                 if m.deactivate {
