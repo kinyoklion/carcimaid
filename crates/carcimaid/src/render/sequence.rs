@@ -317,11 +317,20 @@ fn draw_shape(
     match shape {
         // Box-like shapes carry the label inside; the icon frames the whole box.
         "queue" => {
-            let _ = write!(
-                out,
-                r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}" {f} name="{id}" class="{cls}"/>"#,
-                x = n(x), y = n(y), w = n(w), h = n(h), r = n(h / 2.0), f = fill, id = esc(id), cls = cls,
+            // Horizontal cylinder (mermaid's queue): elliptical end caps.
+            let ry = h / 2.0;
+            let rx = ry / (2.5 + h / 50.0);
+            let body = format!(
+                "M {sx},{y} a {rx},{ry} 0 0 0 0,{h} h {hw} a {rx},{ry} 0 0 0 0,{nh} Z",
+                sx = n(x + rx), y = n(y), rx = n(rx), ry = n(ry),
+                h = n(h), hw = n(w - 2.0 * rx), nh = n(-h),
             );
+            let cap = format!(
+                "M {sx},{y} a {rx},{ry} 0 0 0 0,{h}",
+                sx = n(x + w - rx), y = n(y), rx = n(rx), ry = n(ry), h = n(h),
+            );
+            let _ = write!(out, r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#, d = body, f = fill, id = esc(id), cls = cls);
+            let _ = write!(out, r##"<path d="{d}" fill="none" stroke="#666"/>"##, d = cap);
             actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
         }
         "collections" => {
