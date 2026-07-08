@@ -67,7 +67,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
     // up, height grows) and, when it's wider than the content, widens and
     // re-centres the viewBox — mermaid's viewBox is the getBBox of content plus
     // the centred title text (font-size 18) ± an 8px margin.
-    let title_space = if chart.title.is_some() { TITLE_SPACE } else { 0.0 };
+    let title_space = if chart.title.is_some() {
+        TITLE_SPACE
+    } else {
+        0.0
+    };
     let vh = round(chart.height + title_space);
     let vy = round(oy - title_space);
     let (vx, vw) = match &chart.title {
@@ -131,7 +135,11 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         .iter()
         .map(|n| {
             let (dx, dy) = off(n.home);
-            PlacedNode { cx: n.cx - dx, cy: n.cy - dy, ..n.clone() }
+            PlacedNode {
+                cx: n.cx - dx,
+                cy: n.cy - dy,
+                ..n.clone()
+            }
         })
         .collect();
     let rel_edges: Vec<PlacedEdge> = chart
@@ -150,8 +158,16 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         .clusters
         .iter()
         .map(|c| {
-            let (dx, dy) = off(if c.extracted { Some(c.sg_index) } else { c.home });
-            PlacedCluster { cx: c.cx - dx, cy: c.cy - dy, ..c.clone() }
+            let (dx, dy) = off(if c.extracted {
+                Some(c.sg_index)
+            } else {
+                c.home
+            });
+            PlacedCluster {
+                cx: c.cx - dx,
+                cy: c.cy - dy,
+                ..c.clone()
+            }
         })
         .collect();
     // Emit clusters (and nested subgraph groups) in mermaid's render order.
@@ -159,12 +175,24 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
 
     s.push_str("<g>");
     s.push_str(&markers::block(ID));
-    render_scope(&mut s, &rel_nodes, &rel_edges, &rel_clusters, &chart.scope_offsets, None, (0.0, 0.0), chart.look.roughness(), pal);
+    render_scope(
+        &mut s,
+        &rel_nodes,
+        &rel_edges,
+        &rel_clusters,
+        &chart.scope_offsets,
+        None,
+        (0.0, 0.0),
+        chart.look.roughness(),
+        pal,
+    );
     // Colour-matched point-arrow markers for stroke-coloured edges (unique
     // (side, colour), first-seen order) — mermaid appends these after g.root.
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for e in &chart.edges {
-        let Some(c) = e.stroke.as_deref() else { continue };
+        let Some(c) = e.stroke.as_deref() else {
+            continue;
+        };
         for (side, kind) in [("Start", e.arrow_start), ("End", e.arrow_end)] {
             if kind == crate::ir::ArrowType::Point && !seen.contains(&(side, c)) {
                 seen.push((side, c));
@@ -284,7 +312,12 @@ fn render_scope(
     match owner {
         Some(sg) => {
             let (ax, ay) = scope_offsets[sg];
-            let _ = write!(s, r#"<g class="root" transform="translate({}, {})">"#, round(ax - parent_off.0), round(ay - parent_off.1));
+            let _ = write!(
+                s,
+                r#"<g class="root" transform="translate({}, {})">"#,
+                round(ax - parent_off.0),
+                round(ay - parent_off.1)
+            );
         }
         None => s.push_str(r#"<g class="root">"#),
     }
@@ -326,7 +359,17 @@ fn render_scope(
     // Nested extracted subgraphs belonging to this scope (clusters are pre-sorted
     // into mermaid's render order).
     for cluster in clusters.iter().filter(|c| c.extracted && c.home == owner) {
-        render_scope(s, nodes, edges, clusters, scope_offsets, Some(cluster.sg_index), my_off, roughness, pal);
+        render_scope(
+            s,
+            nodes,
+            edges,
+            clusters,
+            scope_offsets,
+            Some(cluster.sg_index),
+            my_off,
+            roughness,
+            pal,
+        );
     }
     s.push_str("</g>");
 
@@ -336,8 +379,7 @@ fn render_scope(
 fn render_cluster(s: &mut String, cluster: &PlacedCluster, roughness: f64, pal: &Palette) {
     let x = cluster.cx - cluster.width / 2.0;
     let y = cluster.cy - cluster.height / 2.0;
-    let label_cls;
-    if is_hand_drawn(roughness) {
+    let label_cls = if is_hand_drawn(roughness) {
         // Hand-drawn cluster: a rough rectangle (hachure fill + sketch outline)
         // through roughr, mirroring the node pattern. Theme cluster colours are
         // baked as presentation attributes; the subgraph's own `style` (fill /
@@ -381,7 +423,7 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster, roughness: f64, pal: 
             escape(&style_without_fill(&cluster.shape_style)),
         );
         s.push_str("</g>");
-        label_cls = "cluster-label ";
+        "cluster-label "
     } else {
         let _ = write!(
             s,
@@ -395,8 +437,8 @@ fn render_cluster(s: &mut String, cluster: &PlacedCluster, roughness: f64, pal: 
             round(cluster.width),
             round(cluster.height),
         );
-        label_cls = "cluster-label";
-    }
+        "cluster-label"
+    };
     // The label sits centred at the top of the cluster box.
     let label_x = cluster.cx - crate::text::measure_width(&cluster.title, 16.0) / 2.0;
     let _ = write!(
@@ -418,7 +460,11 @@ fn style_without_fill(style: &str) -> String {
     style
         .split(';')
         .filter(|decl| !decl.trim().is_empty())
-        .filter(|decl| decl.split_once(':').map(|(k, _)| k.trim() != "fill").unwrap_or(true))
+        .filter(|decl| {
+            decl.split_once(':')
+                .map(|(k, _)| k.trim() != "fill")
+                .unwrap_or(true)
+        })
         .collect::<Vec<_>>()
         .join(";")
 }
@@ -460,7 +506,9 @@ fn render_node(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette)
     }
     // g.label is offset up by half the label block height so the (possibly
     // multi-line) text is vertically centred, matching mermaid.
-    let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0).len().max(1);
+    let n = crate::text::wrap_label(&node.label, crate::text::WRAP_WIDTH, 16.0)
+        .len()
+        .max(1);
     let block_h = LABEL_HEIGHT + (n as f64 - 1.0) * LINE_SPACING;
     // Label styles (color/font) sit on the g.label; the <text> gets them with
     // `color:` rewritten to `fill:` (see render_text), matching mermaid.
@@ -504,8 +552,13 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
     match node.shape {
         NodeShape::Rectangle | NodeShape::DataStore if is_hand_drawn(roughness) => {
             let o = rough_options(roughness, pal);
-            let drawable = roughr::Generator::new().rectangle(-hw, -hh, node.width, node.height, &o);
-            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            let drawable =
+                roughr::Generator::new().rectangle(-hw, -hh, node.width, node.height, &o);
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container"{}>"#,
+                hd_style(&node.shape_style)
+            );
             emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
@@ -514,7 +567,11 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             // vertical sides dashed away: a `stroke-dasharray` of the rect's own
             // width/height draws only the top and bottom edges.
             let dash = if matches!(node.shape, NodeShape::DataStore) {
-                format!(r#" stroke-dasharray="{} {}""#, round(node.width), round(node.height))
+                format!(
+                    r#" stroke-dasharray="{} {}""#,
+                    round(node.width),
+                    round(node.height)
+                )
             } else {
                 String::new()
             };
@@ -539,13 +596,21 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             if is_stadium {
                 s.push_str(r#"<g class="basic label-container outer-path">"#);
             } else {
-                let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+                let _ = write!(
+                    s,
+                    r#"<g class="basic label-container"{}>"#,
+                    hd_style(&node.shape_style)
+                );
             }
             emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
         NodeShape::RoundedRectangle | NodeShape::Stadium => {
-            let rx = if matches!(node.shape, NodeShape::Stadium) { hh } else { 5.0 };
+            let rx = if matches!(node.shape, NodeShape::Stadium) {
+                hh
+            } else {
+                5.0
+            };
             let _ = write!(
                 s,
                 r#"<rect class="basic label-container"{st} x="{}" y="{}" rx="{}" ry="{}" width="{}" height="{}"/>"#,
@@ -560,7 +625,11 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
         NodeShape::Circle if is_hand_drawn(roughness) => {
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
-            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container"{}>"#,
+                hd_style(&node.shape_style)
+            );
             emit_hd_drawable(s, &drawable, false, &hd_fill, &hd_stroke, &hd_sw);
             s.push_str("</g>");
         }
@@ -581,7 +650,15 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 [side / 2.0, -side],
                 [0.0, -side / 2.0],
             ];
-            emit_hd_polygon(s, &pts, -side / 2.0 + 0.5, side / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -side / 2.0 + 0.5,
+                side / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::Rhombus => {
             // mermaid `question`: a square diamond of side `side`, points laid
@@ -611,14 +688,29 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 [m, -h],
                 [0.0, -h / 2.0],
             ];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -w / 2.0,
+                h / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::Hexagon => {
             let (w, h) = (node.width, node.height);
             let m = h / 4.0;
             emit_polygon(
                 s,
-                &[(m, 0.0), (w - m, 0.0), (w, -h / 2.0), (w - m, -h), (m, -h), (0.0, -h / 2.0)],
+                &[
+                    (m, 0.0),
+                    (w - m, 0.0),
+                    (w, -h / 2.0),
+                    (w - m, -h),
+                    (m, -h),
+                    (0.0, -h / 2.0),
+                ],
                 -w / 2.0,
                 h / 2.0,
                 &st,
@@ -635,7 +727,11 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let rect = gen.rectangle(-hw, -hh, w, h, &o);
             let left = gen.line(-inset, -hh, -inset, hh, &o);
             let right = gen.line(inset, -hh, inset, hh, &o);
-            let _ = write!(s, r#"<g class="basic label-container"{}>"#, hd_style(&node.shape_style));
+            let _ = write!(
+                s,
+                r#"<g class="basic label-container"{}>"#,
+                hd_style(&node.shape_style)
+            );
             emit_hd_drawable(s, &rect, false, &hd_fill, &hd_stroke, &hd_sw);
             emit_drawable(s, &left, false, "", None, &hd_stroke, &hd_sw);
             emit_drawable(s, &right, false, "", None, &hd_stroke, &hd_sw);
@@ -646,8 +742,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             emit_polygon(
                 s,
                 &[
-                    (0.0, 0.0), (w, 0.0), (w, -h), (0.0, -h), (0.0, 0.0),
-                    (-8.0, 0.0), (w + 8.0, 0.0), (w + 8.0, -h), (-8.0, -h), (-8.0, 0.0),
+                    (0.0, 0.0),
+                    (w, 0.0),
+                    (w, -h),
+                    (0.0, -h),
+                    (0.0, 0.0),
+                    (-8.0, 0.0),
+                    (w + 8.0, 0.0),
+                    (w + 8.0, -h),
+                    (-8.0, -h),
+                    (-8.0, 0.0),
                 ],
                 -w / 2.0,
                 h / 2.0,
@@ -659,38 +763,94 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
         NodeShape::Parallelogram if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[-h / 2.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [0.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -w / 2.0,
+                h / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::Parallelogram => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
+            emit_polygon(
+                s,
+                &[(-h / 2.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (0.0, -h)],
+                -w / 2.0,
+                h / 2.0,
+                &st,
+            );
         }
         NodeShape::LeanLeft if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[0.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [-h / 2.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -w / 2.0,
+                h / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::LeanLeft => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
+            emit_polygon(
+                s,
+                &[(0.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (-h / 2.0, -h)],
+                -w / 2.0,
+                h / 2.0,
+                &st,
+            );
         }
         NodeShape::Trapezoid if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[-h / 2.0, 0.0], [w + h / 2.0, 0.0], [w, -h], [0.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -w / 2.0,
+                h / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::Trapezoid => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)], -w / 2.0, h / 2.0, &st);
+            emit_polygon(
+                s,
+                &[(-h / 2.0, 0.0), (w + h / 2.0, 0.0), (w, -h), (0.0, -h)],
+                -w / 2.0,
+                h / 2.0,
+                &st,
+            );
         }
         NodeShape::InvTrapezoid if is_hand_drawn(roughness) => {
             let (w, h) = (node.width - node.height, node.height);
             let pts = [[0.0, 0.0], [w, 0.0], [w + h / 2.0, -h], [-h / 2.0, -h]];
-            emit_hd_polygon(s, &pts, -w / 2.0, h / 2.0, &node.shape_style, roughness, pal);
+            emit_hd_polygon(
+                s,
+                &pts,
+                -w / 2.0,
+                h / 2.0,
+                &node.shape_style,
+                roughness,
+                pal,
+            );
         }
         NodeShape::InvTrapezoid => {
             let (w, h) = (node.width - node.height, node.height);
-            emit_polygon(s, &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)], -w / 2.0, h / 2.0, &st);
+            emit_polygon(
+                s,
+                &[(0.0, 0.0), (w, 0.0), (w + h / 2.0, -h), (-h / 2.0, -h)],
+                -w / 2.0,
+                h / 2.0,
+                &st,
+            );
         }
         NodeShape::Cylinder if is_hand_drawn(roughness) => {
             let w = node.width;
@@ -857,13 +1017,31 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let y = -h / 2.0;
             let path_d = format!(
                 "M{},{} L{},{} L{},{} L{},{} L{},{} M{},{} L{},{} M{},{} L{},{}",
-                x - ro, y - ro, x + w, y - ro, x + w, y + h, x - ro, y + h, x - ro, y - ro,
-                x - ro, y, x + w, y,
-                x, y - ro, x, y + h,
+                x - ro,
+                y - ro,
+                x + w,
+                y - ro,
+                x + w,
+                y + h,
+                x - ro,
+                y + h,
+                x - ro,
+                y - ro,
+                x - ro,
+                y,
+                x + w,
+                y,
+                x,
+                y - ro,
+                x,
+                y + h,
             );
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_d, &o);
-            let _ = write!(s, r#"<g transform="translate(5, 5)" class="basic label-container outer-path">"#);
+            let _ = write!(
+                s,
+                r#"<g transform="translate(5, 5)" class="basic label-container outer-path">"#
+            );
             emit_rough_drawable(s, &drawable, false, &st, pal);
             s.push_str("</g>");
         }
@@ -924,7 +1102,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
         NodeShape::NotchedRect => {
             let (w, h) = (node.width, node.height);
             let n = 12.0;
-            let pts = [(n, -h), (w, -h), (w, 0.0), (0.0, 0.0), (0.0, -h + n), (n, -h)];
+            let pts = [
+                (n, -h),
+                (w, -h),
+                (w, 0.0),
+                (0.0, 0.0),
+                (0.0, -h + n),
+                (n, -h),
+            ];
             emit_polygon(s, &pts, -w / 2.0, h / 2.0, &st);
         }
         // Notched pentagon (loop limit): mermaid `rc.path` through 6 points.
@@ -990,14 +1175,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let radius = h / 2.0;
             let rw = w - radius;
             let tw = h / 4.0;
-            let mut pts: Vec<[f64; 2]> = vec![
-                [rw, 0.0],
-                [tw, 0.0],
-                [0.0, h / 2.0],
-                [tw, h],
-                [rw, h],
-            ];
-            pts.extend(generate_circle_points(-rw, -h / 2.0, radius, 50, 270.0, 90.0));
+            let mut pts: Vec<[f64; 2]> =
+                vec![[rw, 0.0], [tw, 0.0], [0.0, h / 2.0], [tw, h], [rw, h]];
+            pts.extend(generate_circle_points(
+                -rw,
+                -h / 2.0,
+                radius,
+                50,
+                270.0,
+                90.0,
+            ));
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
@@ -1029,7 +1216,15 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let drawable = roughr::Generator::new().circle(0.0, 0.0, node.width, &o);
             s.push_str("<g>");
             let fc_style = format!(r#" style="fill: {} !important;""#, pal.node_border);
-            emit_drawable(s, &drawable, false, &fc_style, Some(pal.node_bkg), pal.node_border, "1.3");
+            emit_drawable(
+                s,
+                &drawable,
+                false,
+                &fc_style,
+                Some(pal.node_bkg),
+                pal.node_border,
+                "1.3",
+            );
             s.push_str("</g>");
         }
         // Framed stop circle (stateEnd): an outer `rc.circle` (stroke = line
@@ -1049,9 +1244,25 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             inner_o.fill_style = "solid".to_string();
             let inner = gen.circle(0.0, 0.0, node.width * 5.0 / 14.0, &inner_o);
             s.push_str(r#"<g class="outer-path">"#);
-            emit_drawable(s, &outer, false, &st, Some(pal.node_bkg), pal.line_color, "2");
+            emit_drawable(
+                s,
+                &outer,
+                false,
+                &st,
+                Some(pal.node_bkg),
+                pal.line_color,
+                "2",
+            );
             s.push_str("<g>");
-            emit_drawable(s, &inner, false, &st, Some(pal.node_border), pal.node_border, "2");
+            emit_drawable(
+                s,
+                &inner,
+                false,
+                &st,
+                Some(pal.node_border),
+                pal.node_border,
+                "2",
+            );
             s.push_str("</g></g>");
         }
         // Crossed circle (crossedCircle, r=30, no label): a `rc.circle` with an X
@@ -1064,7 +1275,10 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let circle = gen.circle(0.0, 0.0, node.width, &o);
             // mermaid's createLine: two diagonals through the ±45° points.
             let a = r * (0.5_f64).sqrt();
-            let line_d = format!("M {},{} L {},{}\n                   M {},{} L {},{}", -a, a, a, -a, a, a, -a, -a);
+            let line_d = format!(
+                "M {},{} L {},{}\n                   M {},{} L {},{}",
+                -a, a, a, -a, a, a, -a, -a
+            );
             let line = gen.path(&line_d, &o);
             s.push_str(r#"<g class="outer-path">"#);
             emit_rough_drawable(s, &circle, false, &st, pal);
@@ -1081,13 +1295,7 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let w = node.width - h / 4.0;
             let (x, y) = (-w / 2.0, -h / 2.0);
             let notch = y / 2.0;
-            let pts = [
-                [x + notch, y],
-                [x, 0.0],
-                [x + notch, -y],
-                [-x, -y],
-                [-x, y],
-            ];
+            let pts = [[x + notch, y], [x, 0.0], [x + notch, -y], [-x, -y], [-x, y]];
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
@@ -1104,7 +1312,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let (w, h) = (node.width, node.height);
             let radius = h / 2.0;
             let mut pts: Vec<[f64; 2]> = vec![[-w / 2.0, -h / 2.0], [w / 2.0 - radius, -h / 2.0]];
-            pts.extend(generate_circle_points(-w / 2.0 + radius, 0.0, radius, 50, 90.0, 270.0));
+            pts.extend(generate_circle_points(
+                -w / 2.0 + radius,
+                0.0,
+                radius,
+                50,
+                90.0,
+                270.0,
+            ));
             pts.push([w / 2.0 - radius, h / 2.0]);
             pts.push([-w / 2.0, h / 2.0]);
             let o = rough_options(roughness, pal);
@@ -1159,7 +1374,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 [-w / 2.0 - ext, -final_h / 2.0],
                 [-w / 2.0 - ext, final_h / 2.0],
             ];
-            pts.extend(full_sine_wave_points(-w / 2.0 - ext, final_h / 2.0, w / 2.0 + ext, final_h / 2.0, wave_amp, 0.8));
+            pts.extend(full_sine_wave_points(
+                -w / 2.0 - ext,
+                final_h / 2.0,
+                w / 2.0 + ext,
+                final_h / 2.0,
+                wave_amp,
+                0.8,
+            ));
             pts.push([w / 2.0 + ext, -final_h / 2.0]);
             pts.push([-w / 2.0 - ext, -final_h / 2.0]);
             pts.push([-w / 2.0, -final_h / 2.0]);
@@ -1187,7 +1409,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let ext = w / 2.0 * 0.1;
             // Document outline (rc.path).
             let mut doc: Vec<[f64; 2]> = vec![[-w / 2.0 - ext, final_h / 2.0]];
-            doc.extend(full_sine_wave_points(-w / 2.0 - ext, final_h / 2.0, w / 2.0 + ext, final_h / 2.0, wave_amp, 0.8));
+            doc.extend(full_sine_wave_points(
+                -w / 2.0 - ext,
+                final_h / 2.0,
+                w / 2.0 + ext,
+                final_h / 2.0,
+                wave_amp,
+                0.8,
+            ));
             doc.push([w / 2.0 + ext, -final_h / 2.0]);
             doc.push([-w / 2.0 - ext, -final_h / 2.0]);
             // Tag (rc.path).
@@ -1198,7 +1427,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                 [x + w, y + h - tag_h],
                 [x + w, (y + h) * 0.9],
             ];
-            tag.extend(full_sine_wave_points(x + w, (y + h) * 1.25, x + w - tag_w, (y + h) * 1.3, -h * 0.02, 0.5));
+            tag.extend(full_sine_wave_points(
+                x + w,
+                (y + h) * 1.25,
+                x + w - tag_w,
+                (y + h) * 1.3,
+                -h * 0.02,
+                0.5,
+            ));
             let o = rough_options(roughness, pal);
             let doc_d = roughr::Generator::new().path(&path_from_points(&doc), &o);
             let tag_d = roughr::Generator::new().path(&path_from_points(&tag), &o);
@@ -1226,7 +1462,14 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let final_h = h + wave_amp / 2.0;
             let x = -w / 2.0;
             let y = -final_h / 2.0;
-            let wave = full_sine_wave_points(x - ro, y + final_h + ro, x + w - ro, y + final_h + ro, wave_amp, 0.8);
+            let wave = full_sine_wave_points(
+                x - ro,
+                y + final_h + ro,
+                x + w - ro,
+                y + final_h + ro,
+                wave_amp,
+                0.8,
+            );
             let last = *wave.last().unwrap();
             let mut outer: Vec<[f64; 2]> = vec![[x - ro, y + ro], [x - ro, y + final_h + ro]];
             outer.extend_from_slice(&wave);
@@ -1303,9 +1546,25 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             // but mermaid pads the box by the sagitta); recover the body width.
             let w = node.width - arc_sagitta(h, rx, ry);
             let mut pts: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0], [-w / 2.0, -h / 2.0]];
-            pts.extend(generate_arc_points(-w / 2.0, -h / 2.0, -w / 2.0, h / 2.0, rx, ry, false));
+            pts.extend(generate_arc_points(
+                -w / 2.0,
+                -h / 2.0,
+                -w / 2.0,
+                h / 2.0,
+                rx,
+                ry,
+                false,
+            ));
             pts.push([w / 2.0, h / 2.0]);
-            pts.extend(generate_arc_points(w / 2.0, h / 2.0, w / 2.0, -h / 2.0, rx, ry, true));
+            pts.extend(generate_arc_points(
+                w / 2.0,
+                h / 2.0,
+                w / 2.0,
+                -h / 2.0,
+                rx,
+                ry,
+                true,
+            ));
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             let _ = write!(
@@ -1325,9 +1584,23 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let final_h = node.height;
             let wave_amp = final_h / 10.0;
             let mut pts: Vec<[f64; 2]> = vec![[-w / 2.0, final_h / 2.0]];
-            pts.extend(full_sine_wave_points(-w / 2.0, final_h / 2.0, w / 2.0, final_h / 2.0, wave_amp, 1.0));
+            pts.extend(full_sine_wave_points(
+                -w / 2.0,
+                final_h / 2.0,
+                w / 2.0,
+                final_h / 2.0,
+                wave_amp,
+                1.0,
+            ));
             pts.push([w / 2.0, -final_h / 2.0]);
-            pts.extend(full_sine_wave_points(w / 2.0, -final_h / 2.0, -w / 2.0, -final_h / 2.0, wave_amp, -1.0));
+            pts.extend(full_sine_wave_points(
+                w / 2.0,
+                -final_h / 2.0,
+                -w / 2.0,
+                -final_h / 2.0,
+                wave_amp,
+                -1.0,
+            ));
             let o = rough_options(roughness, pal);
             let drawable = roughr::Generator::new().path(&path_from_points(&pts), &o);
             s.push_str(r#"<g class="basic label-container">"#);
@@ -1345,8 +1618,15 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                     r#"a{rx},{hh} 0 0 0 0,{hgt} l{body},0 a{rx},{hh} 0 0 0 0,{nhgt} "#,
                     r#"l{nbody},0 M{x2},{nhh} a{rx},{hh} 0 0 1 0,{hgt}"/>"#,
                 ),
-                st = st, nx = round(-hw), nhh = round(-hh), rx = round(rx), hh = round(hh),
-                hgt = round(2.0 * hh), nhgt = round(-2.0 * hh), body = round(body), nbody = round(-body),
+                st = st,
+                nx = round(-hw),
+                nhh = round(-hh),
+                rx = round(rx),
+                hh = round(hh),
+                hgt = round(2.0 * hh),
+                nhgt = round(-2.0 * hh),
+                body = round(body),
+                nbody = round(-body),
                 x2 = round(-hw + body),
             );
         }
@@ -1399,9 +1679,16 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                     r#"class="basic label-container outer-path" transform="translate({tx}, {ty})"/>"#,
                     r#"<path{st} d="M{tx},{cap} a{rx},{ry} 0,0,0 {w},0" transform="translate(0, {ty})"/>"#,
                 ),
-                st = st, ry = round(ry), rx = round(rx), w = round(w), nw = round(-w),
-                body = round(body), nbody = round(-body),
-                tx = round(-w / 2.0), ty = round(-node.height / 2.0), cap = round(2.0 * ry),
+                st = st,
+                ry = round(ry),
+                rx = round(rx),
+                w = round(w),
+                nw = round(-w),
+                body = round(body),
+                nbody = round(-body),
+                tx = round(-w / 2.0),
+                ty = round(-node.height / 2.0),
+                cap = round(2.0 * ry),
             );
         }
         // Fork/join: a thin solid bar (no label), mermaid `rc.rectangle` filled
@@ -1414,7 +1701,15 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             o.stroke = pal.line_color.to_string();
             let drawable = roughr::Generator::new().rectangle(-w / 2.0, -h / 2.0, w, h, &o);
             s.push_str("<g>");
-            emit_drawable(s, &drawable, false, &st, Some(pal.line_color), pal.line_color, "1.3");
+            emit_drawable(
+                s,
+                &drawable,
+                false,
+                &st,
+                Some(pal.line_color),
+                pal.line_color,
+                "1.3",
+            );
             s.push_str("</g>");
         }
         // Text block: a borderless rectangle (label only).
@@ -1422,7 +1717,11 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
             let _ = write!(
                 s,
                 r#"<rect class="label-container"{st} x="{nx}" y="{ny}" width="{w}" height="{h}"/>"#,
-                st = st, nx = round(-hw), ny = round(-hh), w = round(2.0 * hw), h = round(2.0 * hh),
+                st = st,
+                nx = round(-hw),
+                ny = round(-hh),
+                w = round(2.0 * hw),
+                h = round(2.0 * hh),
             );
         }
         // Hourglass (collate): two triangles meeting at the centre, drawn by
@@ -1476,7 +1775,12 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                     r#"<path{st} class="basic label-container outer-path" d="M{nx},0 "#,
                     r#"a{hw},{hh} 0 1 0 {w},0 a{hw},{hh} 0 1 0 {nw},0 Z"/>"#,
                 ),
-                st = st, nx = round(-hw), hw = round(hw), hh = round(hh), w = round(2.0 * hw), nw = round(-2.0 * hw),
+                st = st,
+                nx = round(-hw),
+                hw = round(hw),
+                hh = round(hh),
+                w = round(2.0 * hw),
+                nw = round(-2.0 * hw),
             );
         }
         // Curly braces (curlyBraceLeft / Right / curlyBraces): stroke-only brace
@@ -1487,7 +1791,12 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
         NodeShape::BraceLeft | NodeShape::BraceRight | NodeShape::Braces => {
             // Both-sided braces get 2.5px more dagre width than a single brace, so
             // trim an extra 2.5 to recover the body width.
-            let w = node.width - if matches!(node.shape, NodeShape::Braces) { 12.5 } else { 10.0 };
+            let w = node.width
+                - if matches!(node.shape, NodeShape::Braces) {
+                    12.5
+                } else {
+                    10.0
+                };
             let h = node.height - 10.0;
             let r = (h * 0.1_f64).max(5.0);
             let o = rough_options(roughness, pal);
@@ -1511,42 +1820,136 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                     let mut pts: Vec<[f64; 2]> = Vec::new();
                     pts.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 30, -90.0, 0.0));
                     pts.push([-w / 2.0 - r, r]);
-                    pts.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
-                    pts.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    pts.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    pts.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     pts.push([-w / 2.0 - r, -h / 2.0]);
                     pts.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
-                    let mut rect: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
+                    let mut rect: Vec<[f64; 2]> =
+                        vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
                     rect.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
                     rect.push([-w / 2.0 - r, -r]);
-                    rect.extend(generate_circle_points(w / 2.0 + w * 0.1, -r, r, 20, -180.0, -270.0));
-                    rect.extend(generate_circle_points(w / 2.0 + w * 0.1, r, r, 20, -90.0, -180.0));
+                    rect.extend(generate_circle_points(
+                        w / 2.0 + w * 0.1,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    rect.extend(generate_circle_points(
+                        w / 2.0 + w * 0.1,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     rect.push([-w / 2.0 - r, h / 2.0]);
                     rect.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
                     rect.push([-w / 2.0, h / 2.0 + r]);
                     rect.push([w / 2.0, h / 2.0 + r]);
-                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(r));
+                    let _ = write!(
+                        s,
+                        r#"<g class="text" transform="translate({}, 0)">"#,
+                        round(r)
+                    );
                     emit_brace(s, &pts, true, "");
                     emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
                     s.push_str("</g>");
                 }
                 NodeShape::BraceRight => {
                     let mut pts: Vec<[f64; 2]> = Vec::new();
-                    pts.extend(generate_circle_points_pos(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    pts.extend(generate_circle_points_pos(
+                        w / 2.0,
+                        -h / 2.0,
+                        r,
+                        20,
+                        -90.0,
+                        0.0,
+                    ));
                     pts.push([w / 2.0 + r, -r]);
-                    pts.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
-                    pts.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    pts.extend(generate_circle_points_pos(
+                        w / 2.0 + r * 2.0,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    pts.extend(generate_circle_points_pos(
+                        w / 2.0 + r * 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     pts.push([w / 2.0 + r, h / 2.0]);
-                    pts.extend(generate_circle_points_pos(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
-                    let mut rect: Vec<[f64; 2]> = vec![[-w / 2.0, -h / 2.0 - r], [w / 2.0, -h / 2.0 - r]];
-                    rect.extend(generate_circle_points_pos(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
+                    pts.extend(generate_circle_points_pos(
+                        w / 2.0,
+                        h / 2.0,
+                        r,
+                        20,
+                        0.0,
+                        90.0,
+                    ));
+                    let mut rect: Vec<[f64; 2]> =
+                        vec![[-w / 2.0, -h / 2.0 - r], [w / 2.0, -h / 2.0 - r]];
+                    rect.extend(generate_circle_points_pos(
+                        w / 2.0,
+                        -h / 2.0,
+                        r,
+                        20,
+                        -90.0,
+                        0.0,
+                    ));
                     rect.push([w / 2.0 + r, -r]);
-                    rect.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
-                    rect.extend(generate_circle_points_pos(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    rect.extend(generate_circle_points_pos(
+                        w / 2.0 + r * 2.0,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    rect.extend(generate_circle_points_pos(
+                        w / 2.0 + r * 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     rect.push([w / 2.0 + r, h / 2.0]);
-                    rect.extend(generate_circle_points_pos(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
+                    rect.extend(generate_circle_points_pos(
+                        w / 2.0,
+                        h / 2.0,
+                        r,
+                        20,
+                        0.0,
+                        90.0,
+                    ));
                     rect.push([w / 2.0, h / 2.0 + r]);
                     rect.push([-w / 2.0, h / 2.0 + r]);
-                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(-r));
+                    let _ = write!(
+                        s,
+                        r#"<g class="text" transform="translate({}, 0)">"#,
+                        round(-r)
+                    );
                     emit_brace(s, &pts, true, "");
                     emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
                     s.push_str("</g>");
@@ -1556,33 +1959,122 @@ fn render_shape(s: &mut String, node: &PlacedNode, roughness: f64, pal: &Palette
                     let mut left: Vec<[f64; 2]> = Vec::new();
                     left.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 30, -90.0, 0.0));
                     left.push([-w / 2.0 - r, r]);
-                    left.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
-                    left.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    left.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    left.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     left.push([-w / 2.0 - r, -h / 2.0]);
                     left.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
                     let mut right: Vec<[f64; 2]> = Vec::new();
-                    right.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, -h / 2.0, r, 20, -90.0, -180.0));
+                    right.extend(generate_circle_points(
+                        -w / 2.0 + r + r / 2.0,
+                        -h / 2.0,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     right.push([w / 2.0 - r / 2.0, r]);
-                    right.extend(generate_circle_points(-w / 2.0 - r / 2.0, -r, r, 20, 0.0, 90.0));
-                    right.extend(generate_circle_points(-w / 2.0 - r / 2.0, r, r, 20, -90.0, 0.0));
+                    right.extend(generate_circle_points(
+                        -w / 2.0 - r / 2.0,
+                        -r,
+                        r,
+                        20,
+                        0.0,
+                        90.0,
+                    ));
+                    right.extend(generate_circle_points(
+                        -w / 2.0 - r / 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        0.0,
+                    ));
                     right.push([w / 2.0 - r / 2.0, -r]);
-                    right.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, h / 2.0, r, 30, -180.0, -270.0));
-                    let mut rect: Vec<[f64; 2]> = vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
+                    right.extend(generate_circle_points(
+                        -w / 2.0 + r + r / 2.0,
+                        h / 2.0,
+                        r,
+                        30,
+                        -180.0,
+                        -270.0,
+                    ));
+                    let mut rect: Vec<[f64; 2]> =
+                        vec![[w / 2.0, -h / 2.0 - r], [-w / 2.0, -h / 2.0 - r]];
                     rect.extend(generate_circle_points(w / 2.0, -h / 2.0, r, 20, -90.0, 0.0));
                     rect.push([-w / 2.0 - r, -r]);
-                    rect.extend(generate_circle_points(w / 2.0 + r * 2.0, -r, r, 20, -180.0, -270.0));
-                    rect.extend(generate_circle_points(w / 2.0 + r * 2.0, r, r, 20, -90.0, -180.0));
+                    rect.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        -r,
+                        r,
+                        20,
+                        -180.0,
+                        -270.0,
+                    ));
+                    rect.extend(generate_circle_points(
+                        w / 2.0 + r * 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     rect.push([-w / 2.0 - r, h / 2.0]);
                     rect.extend(generate_circle_points(w / 2.0, h / 2.0, r, 20, 0.0, 90.0));
                     rect.push([-w / 2.0, h / 2.0 + r]);
                     rect.push([w / 2.0 - r - r / 2.0, h / 2.0 + r]);
-                    rect.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, -h / 2.0, r, 20, -90.0, -180.0));
+                    rect.extend(generate_circle_points(
+                        -w / 2.0 + r + r / 2.0,
+                        -h / 2.0,
+                        r,
+                        20,
+                        -90.0,
+                        -180.0,
+                    ));
                     rect.push([w / 2.0 - r / 2.0, r]);
-                    rect.extend(generate_circle_points(-w / 2.0 - r / 2.0, -r, r, 20, 0.0, 90.0));
-                    rect.extend(generate_circle_points(-w / 2.0 - r / 2.0, r, r, 20, -90.0, 0.0));
+                    rect.extend(generate_circle_points(
+                        -w / 2.0 - r / 2.0,
+                        -r,
+                        r,
+                        20,
+                        0.0,
+                        90.0,
+                    ));
+                    rect.extend(generate_circle_points(
+                        -w / 2.0 - r / 2.0,
+                        r,
+                        r,
+                        20,
+                        -90.0,
+                        0.0,
+                    ));
                     rect.push([w / 2.0 - r / 2.0, -r]);
-                    rect.extend(generate_circle_points(-w / 2.0 + r + r / 2.0, h / 2.0, r, 30, -180.0, -270.0));
-                    let _ = write!(s, r#"<g class="text" transform="translate({}, 0)">"#, round(r - r / 4.0));
+                    rect.extend(generate_circle_points(
+                        -w / 2.0 + r + r / 2.0,
+                        h / 2.0,
+                        r,
+                        30,
+                        -180.0,
+                        -270.0,
+                    ));
+                    let _ = write!(
+                        s,
+                        r#"<g class="text" transform="translate({}, 0)">"#,
+                        round(r - r / 4.0)
+                    );
                     emit_brace(s, &right, true, "");
                     emit_brace(s, &left, true, "");
                     emit_brace(s, &rect, false, r#" stroke-opacity="0""#);
@@ -1630,7 +2122,9 @@ fn is_hand_drawn(roughness: f64) -> bool {
 /// `!important`/whitespace. Returns `None` when the property is absent.
 fn css_value(style: &str, prop: &str) -> Option<String> {
     for decl in style.split(';') {
-        let Some((k, v)) = decl.split_once(':') else { continue };
+        let Some((k, v)) = decl.split_once(':') else {
+            continue;
+        };
         if k.trim() == prop {
             return Some(v.replace("!important", "").trim().to_string());
         }
@@ -1655,7 +2149,14 @@ fn hand_drawn_colors(shape_style: &str, pal: &Palette) -> (String, String, Strin
 
 /// Emit a rough drawable for a hand-drawn shape with explicit resolved colours
 /// (the hachure fill colour, the outline stroke, and its width).
-fn emit_hd_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, fill: &str, stroke: &str, sw: &str) {
+fn emit_hd_drawable(
+    s: &mut String,
+    drawable: &roughr::Drawable,
+    evenodd: bool,
+    fill: &str,
+    stroke: &str,
+    sw: &str,
+) {
     emit_drawable(s, drawable, evenodd, "", Some(fill), stroke, sw);
 }
 
@@ -1685,7 +2186,15 @@ fn hd_style(shape_style: &str) -> String {
 /// Emit a hand-drawn polygon shape (rhombus / hexagon / slanted shapes): a
 /// `<g transform=… style=…>` wrapping the rough hachure-fill + outline paths,
 /// built from the same vertex array the classic look uses.
-fn emit_hd_polygon(s: &mut String, points: &[[f64; 2]], tx: f64, ty: f64, shape_style: &str, roughness: f64, pal: &Palette) {
+fn emit_hd_polygon(
+    s: &mut String,
+    points: &[[f64; 2]],
+    tx: f64,
+    ty: f64,
+    shape_style: &str,
+    roughness: f64,
+    pal: &Palette,
+) {
     let o = rough_options(roughness, pal);
     let drawable = roughr::Generator::new().polygon(points, &o);
     let (fill, stroke, sw) = hand_drawn_colors(shape_style, pal);
@@ -1746,8 +2255,22 @@ fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, r: f64) -> String {
 /// `<g>`, and call this to emit the fill + stroke children.
 ///
 /// [`Drawable`]: roughr::Drawable
-fn emit_rough_drawable(s: &mut String, drawable: &roughr::Drawable, evenodd: bool, st: &str, pal: &Palette) {
-    emit_drawable(s, drawable, evenodd, st, Some(pal.node_bkg), pal.node_border, "1.3");
+fn emit_rough_drawable(
+    s: &mut String,
+    drawable: &roughr::Drawable,
+    evenodd: bool,
+    st: &str,
+    pal: &Palette,
+) {
+    emit_drawable(
+        s,
+        drawable,
+        evenodd,
+        st,
+        Some(pal.node_bkg),
+        pal.node_border,
+        "1.3",
+    );
 }
 
 /// General form of [`emit_rough_drawable`] with explicit colours. When `fill` is
@@ -1775,7 +2298,11 @@ fn emit_drawable(
                 r##"<path d="{fill_d}" stroke="{fc}" stroke-width="4" fill="none" stroke-dasharray="0 0"{st}/>"##,
             );
         } else {
-            let rule = if evenodd { r#" fill-rule="evenodd""# } else { "" };
+            let rule = if evenodd {
+                r#" fill-rule="evenodd""#
+            } else {
+                ""
+            };
             let _ = write!(
                 s,
                 r##"<path d="{fill_d}" stroke="none" stroke-width="0" fill="{fc}"{rule}{st}/>"##,
@@ -1798,7 +2325,11 @@ fn emit_drawable(
 fn emit_merged(s: &mut String, drawable: &roughr::Drawable, st: &str, pal: &Palette) {
     let fill = drawable.fill_path(None);
     let stroke = drawable.stroke_path(None);
-    let d = if fill.is_empty() { stroke } else { format!("{fill} {stroke}") };
+    let d = if fill.is_empty() {
+        stroke
+    } else {
+        format!("{fill} {stroke}")
+    };
     let _ = write!(
         s,
         r##"<g><path d="{d}" fill="{fill_c}" fill-opacity="1" stroke="{stroke_c}" stroke-width="1.3" stroke-opacity="1"{st}/></g>"##,
@@ -1945,7 +2476,12 @@ fn emit_polygon(s: &mut String, points: &[(f64, f64)], tx: f64, ty: f64, style: 
         let _ = write!(s, "{},{}", round(*x), round(*y));
     }
     // No space after the comma: matches mermaid's insertPolygonShape output.
-    let _ = write!(s, r#"" transform="translate({},{})"/>"#, round(tx), round(ty));
+    let _ = write!(
+        s,
+        r#"" transform="translate({},{})"/>"#,
+        round(tx),
+        round(ty)
+    );
 }
 
 /// `L_<fromId>_<toId>_0`, mermaid's stable edge id (uses node ids, not indices).
@@ -2029,7 +2565,11 @@ fn marker_ref(side: &str, kind: ArrowType, color: Option<&str>) -> String {
         (ArrowType::Point, Some(c)) => format!("_{c}"),
         _ => String::new(),
     };
-    let attr = if side == "Start" { "marker-start" } else { "marker-end" };
+    let attr = if side == "Start" {
+        "marker-start"
+    } else {
+        "marker-end"
+    };
     format!(r#" {attr}="url(#{ID}_flowchart-v2-{name}{side}{suffix})""#)
 }
 
@@ -2082,7 +2622,13 @@ fn clip_to_shape(node: &PlacedNode, toward: (f64, f64)) -> Option<(f64, f64)> {
     // Stadium (pill) has fully-rounded ends; a diagonal edge would otherwise end
     // at the bounding-box corner, outside the shape. Clip to the rounded outline.
     if let NodeShape::Stadium = node.shape {
-        return Some(clip_rounded_rect(c, node.width, node.height, node.height / 2.0, toward));
+        return Some(clip_rounded_rect(
+            c,
+            node.width,
+            node.height,
+            node.height / 2.0,
+            toward,
+        ));
     }
     // Vertical cylinders: dagre routes to the (full-height) bounding rect, but the
     // top/bottom are elliptical caps, so an edge aimed near a cap ends above/below
@@ -2147,39 +2693,82 @@ fn clip_to_shape(node: &PlacedNode, toward: (f64, f64)) -> Option<(f64, f64)> {
 fn shape_boundary(node: &PlacedNode) -> Option<Vec<(f64, f64)>> {
     let (cx, cy, w, h) = (node.cx, node.cy, node.width, node.height);
     let map = |pts: &[(f64, f64)], tx: f64, ty: f64| -> Vec<(f64, f64)> {
-        pts.iter().map(|&(x, y)| (x + tx + cx, y + ty + cy)).collect()
+        pts.iter()
+            .map(|&(x, y)| (x + tx + cx, y + ty + cy))
+            .collect()
     };
     match node.shape {
         NodeShape::Rhombus => {
             let s = w;
-            Some(map(&[(s / 2.0, 0.0), (s, -s / 2.0), (s / 2.0, -s), (0.0, -s / 2.0)], -s / 2.0 + 0.5, s / 2.0))
+            Some(map(
+                &[
+                    (s / 2.0, 0.0),
+                    (s, -s / 2.0),
+                    (s / 2.0, -s),
+                    (0.0, -s / 2.0),
+                ],
+                -s / 2.0 + 0.5,
+                s / 2.0,
+            ))
         }
         NodeShape::Hexagon => {
             let m = h / 4.0;
-            Some(map(&[(m, 0.0), (w - m, 0.0), (w, -h / 2.0), (w - m, -h), (m, -h), (0.0, -h / 2.0)], -w / 2.0, h / 2.0))
+            Some(map(
+                &[
+                    (m, 0.0),
+                    (w - m, 0.0),
+                    (w, -h / 2.0),
+                    (w - m, -h),
+                    (m, -h),
+                    (0.0, -h / 2.0),
+                ],
+                -w / 2.0,
+                h / 2.0,
+            ))
         }
         NodeShape::Parallelogram => {
             let iw = w - h;
-            Some(map(&[(-h / 2.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (0.0, -h)], -iw / 2.0, h / 2.0))
+            Some(map(
+                &[(-h / 2.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (0.0, -h)],
+                -iw / 2.0,
+                h / 2.0,
+            ))
         }
         NodeShape::LeanLeft => {
             let iw = w - h;
-            Some(map(&[(0.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (-h / 2.0, -h)], -iw / 2.0, h / 2.0))
+            Some(map(
+                &[(0.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (-h / 2.0, -h)],
+                -iw / 2.0,
+                h / 2.0,
+            ))
         }
         NodeShape::Trapezoid => {
             let iw = w - h;
-            Some(map(&[(-h / 2.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (0.0, -h)], -iw / 2.0, h / 2.0))
+            Some(map(
+                &[(-h / 2.0, 0.0), (iw + h / 2.0, 0.0), (iw, -h), (0.0, -h)],
+                -iw / 2.0,
+                h / 2.0,
+            ))
         }
         NodeShape::InvTrapezoid => {
             let iw = w - h;
-            Some(map(&[(0.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (-h / 2.0, -h)], -iw / 2.0, h / 2.0))
+            Some(map(
+                &[(0.0, 0.0), (iw, 0.0), (iw + h / 2.0, -h), (-h / 2.0, -h)],
+                -iw / 2.0,
+                h / 2.0,
+            ))
         }
         _ => None,
     }
 }
 
 /// Intersection point of segments p1→p2 and p3→p4, if they cross.
-fn segment_intersect(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), p4: (f64, f64)) -> Option<(f64, f64)> {
+fn segment_intersect(
+    p1: (f64, f64),
+    p2: (f64, f64),
+    p3: (f64, f64),
+    p4: (f64, f64),
+) -> Option<(f64, f64)> {
     let d = (p2.0 - p1.0) * (p4.1 - p3.1) - (p2.1 - p1.1) * (p4.0 - p3.0);
     if d.abs() < 1e-9 {
         return None;
@@ -2273,10 +2862,20 @@ fn render_edge_label(s: &mut String, edge: &PlacedEdge, nodes: &[PlacedNode]) {
 /// emitted (mermaid's shape for an unlabelled edge). `anchor` adds
 /// `text-anchor="middle"` (edge labels) on the `<text>` and each row.
 fn render_text(s: &mut String, label: Option<&str>, anchor: bool, style: &str) {
-    let ta = if anchor { r#" text-anchor="middle""# } else { "" };
+    let ta = if anchor {
+        r#" text-anchor="middle""#
+    } else {
+        ""
+    };
     // On the SVG <text>, mermaid applies label styles with `color:` as `fill:`.
     let st = style_attr(&style.replace("color:", "fill:"));
-    let _ = write!(s, r#"<text y="{y}"{ta}{st}>"#, y = round(-LABEL_HEIGHT / 2.0 - 0.6), ta = ta, st = st);
+    let _ = write!(
+        s,
+        r#"<text y="{y}"{ta}{st}>"#,
+        y = round(-LABEL_HEIGHT / 2.0 - 0.6),
+        ta = ta,
+        st = st
+    );
 
     let lines = label
         .map(|l| crate::text::wrap_label(l, crate::text::WRAP_WIDTH, 16.0))
@@ -2296,7 +2895,11 @@ fn render_text(s: &mut String, label: Option<&str>, anchor: bool, style: &str) {
                 r#"<tspan class="text-outer-tspan row" x="0" y="{y}em" dy="1.1em"{ta}>"#,
             );
             for (j, word) in words.iter().enumerate() {
-                let text = if j == 0 { word.clone() } else { format!(" {word}") };
+                let text = if j == 0 {
+                    word.clone()
+                } else {
+                    format!(" {word}")
+                };
                 let _ = write!(
                     s,
                     r#"<tspan font-style="normal" class="text-inner-tspan" font-weight="normal">{}</tspan>"#,
@@ -2353,7 +2956,12 @@ fn curve_basis(points: &[(f64, f64)]) -> String {
             }
             1 => {}
             2 => {
-                let _ = write!(d, "L{},{}", num((5.0 * x0 + x1) / 6.0), num((5.0 * y0 + y1) / 6.0));
+                let _ = write!(
+                    d,
+                    "L{},{}",
+                    num((5.0 * x0 + x1) / 6.0),
+                    num((5.0 * y0 + y1) / 6.0)
+                );
                 bezier(&mut d, x0, y0, x1, y1, x, y);
             }
             _ => bezier(&mut d, x0, y0, x1, y1, x, y),

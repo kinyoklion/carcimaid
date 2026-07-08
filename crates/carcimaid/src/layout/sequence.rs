@@ -130,11 +130,19 @@ impl ActivationState {
         let stacked = self.count(actor) as f64;
         let cx = actors[actor].cx();
         let x = cx + (stacked - 1.0) * ACTIVATION_WIDTH / 2.0;
-        self.stack.push(ActiveBar { actor, startx: x, stopx: x + ACTIVATION_WIDTH, starty, order });
+        self.stack.push(ActiveBar {
+            actor,
+            startx: x,
+            stopx: x + ACTIVATION_WIDTH,
+            starty,
+            order,
+        });
     }
     /// Close the most recent bar on `actor` at `cursor`, emitting the rect.
     fn end(&mut self, actor: usize, cursor: f64) {
-        let Some(pos) = self.stack.iter().rposition(|b| b.actor == actor) else { return };
+        let Some(pos) = self.stack.iter().rposition(|b| b.actor == actor) else {
+            return;
+        };
         let bar = self.stack.remove(pos);
         let remaining = self.count(actor);
         let (mut y, mut stopy) = (bar.starty, cursor);
@@ -414,11 +422,19 @@ fn note_geometry(note: &crate::ir::SeqNote, actors: &[PlacedActor]) -> (f64, f64
     let a = &actors[note.actors[0]];
     match note.placement {
         NotePlacement::RightOf => {
-            let width = if note.wrap { ACTOR_WIDTH } else { a.width.max(text_w + 2.0 * NOTE_MARGIN) };
+            let width = if note.wrap {
+                ACTOR_WIDTH
+            } else {
+                a.width.max(text_w + 2.0 * NOTE_MARGIN)
+            };
             (a.x + (a.width + ACTOR_MARGIN) / 2.0, width)
         }
         NotePlacement::LeftOf => {
-            let width = if note.wrap { ACTOR_WIDTH } else { a.width.max(text_w + 2.0 * NOTE_MARGIN) };
+            let width = if note.wrap {
+                ACTOR_WIDTH
+            } else {
+                a.width.max(text_w + 2.0 * NOTE_MARGIN)
+            };
             (a.x - width + (a.width - ACTOR_MARGIN) / 2.0, width)
         }
         NotePlacement::Over if note.actors.len() >= 2 => {
@@ -561,7 +577,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     //     its members) + which participants belong to each box.
     let nb = d.boxes.len();
     let mut box_margin = vec![BOX_TEXT_MARGIN; nb];
-    for b in 0..nb {
+    for (b, bm) in box_margin.iter_mut().enumerate() {
         // mermaid: totalWidth = Σ(actor.width + actor.margin) + 8*boxMargin
         // - 2*boxTextMargin; if the title is wider, grow the margin to close half
         // the gap on each side so the box fits the (unwrapped) title.
@@ -573,7 +589,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         let title_w = label_width(&d.boxes[b].name, LABEL_FONT);
         let min_width = total_w.max(title_w + 2.0 * WRAP_PADDING);
         if total_w < min_width {
-            box_margin[b] += (min_width - total_w) / 2.0;
+            *bm += (min_width - total_w) / 2.0;
         }
     }
 
@@ -646,7 +662,11 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     // whole diagram shifts down by boxMargin + label height when boxes exist.
     let has_boxes = box_seen.iter().any(|&s| s);
     let box_label_h = SEQ_LINE_HEIGHT; // single-line box names
-    let top_y = if has_boxes { BOX_MARGIN + box_label_h } else { 0.0 };
+    let top_y = if has_boxes {
+        BOX_MARGIN + box_label_h
+    } else {
+        0.0
+    };
     for a in &mut actors {
         a.starty = top_y;
     }
@@ -791,21 +811,33 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
                     pending_create.remove(pos);
                     actors[m.to].starty = line_y - half_h;
                     let a = half_w(&actors[m.to]) + 3.0;
-                    stop_x += if actors[m.to].x < actors[m.from].x { a } else { -a };
+                    stop_x += if actors[m.to].x < actors[m.from].x {
+                        a
+                    } else {
+                        -a
+                    };
                     cursor = line_y + half_h;
                 } else if let Some(pos) = pending_destroy.iter().position(|&x| x == m.from) {
                     pending_destroy.remove(pos);
                     actors[m.from].stopy = line_y - half_h;
                     actors[m.from].destroyed = true;
                     let a = half_w(&actors[m.from]);
-                    start_x += if actors[m.from].x < actors[m.to].x { a } else { -a };
+                    start_x += if actors[m.from].x < actors[m.to].x {
+                        a
+                    } else {
+                        -a
+                    };
                     cursor = line_y + half_h;
                 } else if let Some(pos) = pending_destroy.iter().position(|&x| x == m.to) {
                     pending_destroy.remove(pos);
                     actors[m.to].stopy = line_y - half_h;
                     actors[m.to].destroyed = true;
                     let a = half_w(&actors[m.to]);
-                    stop_x += if actors[m.to].x < actors[m.from].x { a } else { -a };
+                    stop_x += if actors[m.to].x < actors[m.from].x {
+                        a
+                    } else {
+                        -a
+                    };
                     cursor = line_y + half_h;
                 }
 
@@ -880,10 +912,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
 
     // 7. Content bounding box (actors + note extents; notes can overhang).
     let mut box_startx = actors.iter().map(|a| a.x).fold(0.0_f64, f64::min);
-    let mut box_stopx = actors
-        .iter()
-        .map(|a| a.x + a.width)
-        .fold(0.0_f64, f64::max);
+    let mut box_stopx = actors.iter().map(|a| a.x + a.width).fold(0.0_f64, f64::max);
     for note in &notes {
         box_startx = box_startx.min(note.x);
         box_stopx = box_stopx.max(note.x + note.width);
@@ -902,7 +931,11 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
     }
     for m in &messages {
         // Self-loops bulge right to start_x + 61.
-        let hi = if m.self_loop { m.start_x + 61.0 } else { m.start_x.max(m.stop_x) };
+        let hi = if m.self_loop {
+            m.start_x + 61.0
+        } else {
+            m.start_x.max(m.stop_x)
+        };
         box_startx = box_startx.min(m.start_x.min(m.stop_x));
         box_stopx = box_stopx.max(hi);
     }

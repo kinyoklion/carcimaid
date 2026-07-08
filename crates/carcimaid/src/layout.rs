@@ -11,8 +11,8 @@ use crate::ir::{Diagram, Direction, Flowchart, NodeShape};
 use crate::Result;
 
 use dagre::graph::{Graph, GraphOptions};
-use dagre::layout::types::{EdgeLabel, LayoutOptions, NodeLabel, RankDir};
 use dagre::layout::layout as dagre_layout;
+use dagre::layout::types::{EdgeLabel, LayoutOptions, NodeLabel, RankDir};
 
 pub mod sequence;
 
@@ -363,11 +363,12 @@ const SUBGRAPH_RANKSEP_INC: f64 = 25.0;
 /// Direction a separately-laid-out subgraph uses: explicit, else transposed
 /// from the parent (`TB -> LR`, anything else -> `TB`).
 fn subgraph_dir(sg: &crate::ir::Subgraph, parent: Direction) -> Direction {
-    sg.direction.unwrap_or(if matches!(parent, Direction::TopBottom) {
-        Direction::LeftRight
-    } else {
-        Direction::TopBottom
-    })
+    sg.direction
+        .unwrap_or(if matches!(parent, Direction::TopBottom) {
+            Direction::LeftRight
+        } else {
+            Direction::TopBottom
+        })
 }
 
 /// The subgraphs containing `node`, innermost first.
@@ -427,8 +428,9 @@ fn endpoint_key(chart: &Flowchart, ext: &[bool], n: usize) -> String {
 /// subgraph (lower renders first).
 fn render_order(chart: &Flowchart) -> Vec<usize> {
     fn dfs(chart: &Flowchart, parent: Option<usize>, rank: &mut Vec<usize>, next: &mut usize) {
-        let mut children: Vec<usize> =
-            (0..chart.subgraphs.len()).filter(|&s| chart.subgraphs[s].parent == parent).collect();
+        let mut children: Vec<usize> = (0..chart.subgraphs.len())
+            .filter(|&s| chart.subgraphs[s].parent == parent)
+            .collect();
         children.reverse();
         for c in children {
             rank[c] = *next;
@@ -491,25 +493,43 @@ fn layout_scope(
     for s in 0..chart.subgraphs.len() {
         if home_sg(chart, ext, s) == owner && ext[s] {
             let sdir = subgraph_dir(&chart.subgraphs[s], dir);
-            let sc = layout_scope(chart, sizes, ext, Some(s), sdir, ranksep + SUBGRAPH_RANKSEP_INC, offsets);
+            let sc = layout_scope(
+                chart,
+                sizes,
+                ext,
+                Some(s),
+                sdir,
+                ranksep + SUBGRAPH_RANKSEP_INC,
+                offsets,
+            );
             sub.insert(s, sc);
         }
     }
 
-    let mut g: Graph<NodeLabel, EdgeLabel> =
-        Graph::with_options(GraphOptions { directed: true, multigraph: true, compound: true });
+    let mut g: Graph<NodeLabel, EdgeLabel> = Graph::with_options(GraphOptions {
+        directed: true,
+        multigraph: true,
+        compound: true,
+    });
 
     // An extracted subgraph is its own enclosing cluster in this layout.
     if let Some(o) = owner {
         g.set_node(format!("c{o}"), Some(NodeLabel::default()));
     }
-    for n in 0..chart.nodes.len() {
-        if chart.nodes[n].subgraph_ref.is_some() {
+    for (n, node) in chart.nodes.iter().enumerate() {
+        if node.subgraph_ref.is_some() {
             continue; // stands in for a subgraph; the cluster node carries it
         }
         if home_node(chart, ext, n) == owner {
             let (w, h) = sizes[n];
-            g.set_node(format!("n{n}"), Some(NodeLabel { width: w, height: h, ..Default::default() }));
+            g.set_node(
+                format!("n{n}"),
+                Some(NodeLabel {
+                    width: w,
+                    height: h,
+                    ..Default::default()
+                }),
+            );
         }
     }
     for s in 0..chart.subgraphs.len() {
@@ -518,7 +538,14 @@ fn layout_scope(
         }
         if ext[s] {
             let c = &sub[&s];
-            g.set_node(format!("s{s}"), Some(NodeLabel { width: c.own_w, height: c.own_h, ..Default::default() }));
+            g.set_node(
+                format!("s{s}"),
+                Some(NodeLabel {
+                    width: c.own_w,
+                    height: c.own_h,
+                    ..Default::default()
+                }),
+            );
         } else {
             g.set_node(format!("c{s}"), Some(NodeLabel::default()));
         }
@@ -544,7 +571,11 @@ fn layout_scope(
         if home_sg(chart, ext, s) != owner {
             continue;
         }
-        let key = if ext[s] { format!("s{s}") } else { format!("c{s}") };
+        let key = if ext[s] {
+            format!("s{s}")
+        } else {
+            format!("c{s}")
+        };
         if let Some(pk) = parent_key(chart.subgraphs[s].parent) {
             g.set_parent(&key, Some(&pk));
         }
@@ -552,13 +583,21 @@ fn layout_scope(
     for (i, e) in chart.edges.iter().enumerate() {
         if endpoint_home(chart, ext, e.from) == owner && endpoint_home(chart, ext, e.to) == owner {
             let (lw, lh) = match &e.label {
-                Some(l) => (crate::text::measure_width(l, FONT_SIZE), crate::text::line_height(FONT_SIZE)),
+                Some(l) => (
+                    crate::text::measure_width(l, FONT_SIZE),
+                    crate::text::line_height(FONT_SIZE),
+                ),
                 None => (0.0, 0.0),
             };
             g.set_edge(
                 endpoint_key(chart, ext, e.from),
                 endpoint_key(chart, ext, e.to),
-                Some(EdgeLabel { width: lw, height: lh, minlen: e.min_len.max(1) as i32, ..Default::default() }),
+                Some(EdgeLabel {
+                    width: lw,
+                    height: lh,
+                    minlen: e.min_len.max(1) as i32,
+                    ..Default::default()
+                }),
                 Some(i.to_string().as_str()),
             );
         }
@@ -585,7 +624,11 @@ fn layout_scope(
         }
         if home_node(chart, ext, n) == owner {
             let node = g.node(&format!("n{n}"));
-            out.nodes.push((n, node.and_then(|x| x.x).unwrap_or(0.0), node.and_then(|x| x.y).unwrap_or(0.0)));
+            out.nodes.push((
+                n,
+                node.and_then(|x| x.x).unwrap_or(0.0),
+                node.and_then(|x| x.y).unwrap_or(0.0),
+            ));
         }
     }
     for s in 0..chart.subgraphs.len() {
@@ -608,7 +651,8 @@ fn layout_scope(
                 out.clusters.push((s2, cx + ox, cy + oy, w, h));
             }
             for (e2, pts) in &c.edges {
-                out.edges.push((*e2, pts.iter().map(|&(x, y)| (x + ox, y + oy)).collect()));
+                out.edges
+                    .push((*e2, pts.iter().map(|&(x, y)| (x + ox, y + oy)).collect()));
             }
         } else {
             let node = g.node(&format!("c{s}"));
@@ -623,7 +667,10 @@ fn layout_scope(
     }
     for (i, e) in chart.edges.iter().enumerate() {
         if endpoint_home(chart, ext, e.from) == owner && endpoint_home(chart, ext, e.to) == owner {
-            let (fk, tk) = (endpoint_key(chart, ext, e.from), endpoint_key(chart, ext, e.to));
+            let (fk, tk) = (
+                endpoint_key(chart, ext, e.from),
+                endpoint_key(chart, ext, e.to),
+            );
             if let Some(el) = g.edge(&fk, &tk, Some(&i.to_string())) {
                 let pts: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
                 if !pts.is_empty() {
@@ -641,7 +688,8 @@ fn layout_scope(
         out.own_cy = node.and_then(|x| x.y).unwrap_or(0.0);
         out.own_w = node.map(|x| x.width).unwrap_or(0.0);
         out.own_h = node.map(|x| x.height).unwrap_or(0.0);
-        out.clusters.push((o, out.own_cx, out.own_cy, out.own_w, out.own_h));
+        out.clusters
+            .push((o, out.own_cx, out.own_cy, out.own_w, out.own_h));
     }
     out
 }
@@ -848,21 +896,24 @@ fn layout_flowchart(chart: &Flowchart) -> LaidOutFlowchart {
     }
 }
 
-
 /// The point at 50% of a polyline's arc length — where mermaid places edge labels.
 fn midpoint_by_length(points: &[(f64, f64)]) -> (f64, f64) {
     match points {
         [] => (0.0, 0.0),
         [p] => *p,
         _ => {
-            let seg = |a: (f64, f64), b: (f64, f64)| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+            let seg =
+                |a: (f64, f64), b: (f64, f64)| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
             let total: f64 = points.windows(2).map(|w| seg(w[0], w[1])).sum();
             let mut remaining = total / 2.0;
             for w in points.windows(2) {
                 let d = seg(w[0], w[1]);
                 if d >= remaining {
                     let t = if d > 0.0 { remaining / d } else { 0.0 };
-                    return (w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t);
+                    return (
+                        w[0].0 + (w[1].0 - w[0].0) * t,
+                        w[0].1 + (w[1].1 - w[0].1) * t,
+                    );
                 }
                 remaining -= d;
             }
@@ -887,7 +938,13 @@ mod tests {
     fn rhombus_and_circle_are_square() {
         let f = flowchart("flowchart TD\n A{Ready} --> B((Go))");
         for n in &f.nodes {
-            assert!((n.width - n.height).abs() < 1e-9, "{} not square: {}x{}", n.id, n.width, n.height);
+            assert!(
+                (n.width - n.height).abs() < 1e-9,
+                "{} not square: {}x{}",
+                n.id,
+                n.width,
+                n.height
+            );
         }
     }
 
@@ -904,6 +961,11 @@ mod tests {
         assert!(approx(f.nodes[0].cy, 32.5), "{}", f.nodes[0].cy);
         assert!(approx(f.nodes[1].cy, 131.5), "{}", f.nodes[1].cy);
         assert!(approx(f.nodes[2].cy, 230.5), "{}", f.nodes[2].cy);
-        assert!(approx(f.width, 128.86) && approx(f.height, 263.0), "{}x{}", f.width, f.height);
+        assert!(
+            approx(f.width, 128.86) && approx(f.height, 263.0),
+            "{}x{}",
+            f.width,
+            f.height
+        );
     }
 }

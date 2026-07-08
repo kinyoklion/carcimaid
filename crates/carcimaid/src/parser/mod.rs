@@ -18,8 +18,8 @@ pub fn parse(source: &str) -> Result<Diagram> {
     let look = frontmatter_look(source).or_else(|| init_look(source));
     let theme = frontmatter_theme(source);
     let source = strip_frontmatter(source);
-    let header = first_keyword(source)
-        .ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
+    let header =
+        first_keyword(source).ok_or_else(|| Error::Parse("empty diagram (no content)".into()))?;
 
     match header {
         "flowchart" | "graph" => {
@@ -203,57 +203,6 @@ fn strip_frontmatter(source: &str) -> &str {
     source
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn strips_frontmatter_then_parses() {
-        let src = "---\ntitle: My Chart\nconfig:\n  flowchart:\n    curve: linear\n---\nflowchart TD\n A --> B";
-        let diagram = parse(src).unwrap();
-        let Diagram::Flowchart(f) = diagram else { unreachable!() };
-        assert_eq!(f.nodes.len(), 2);
-    }
-
-    #[test]
-    fn parses_handdrawn_look() {
-        let src = "---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
-        assert_eq!(f.look, Look::HandDrawn);
-    }
-
-    #[test]
-    fn defaults_to_classic_look() {
-        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else { unreachable!() };
-        assert_eq!(f.look, Look::Classic);
-    }
-
-    #[test]
-    fn parses_theme_forest() {
-        let src = "---\nconfig:\n  theme: forest\n---\nflowchart TD\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
-        assert_eq!(f.theme, Theme::Forest);
-    }
-
-    #[test]
-    fn parses_theme_base_with_other_config() {
-        let src = "---\ntitle: T\nconfig:\n  theme: base\n  flowchart:\n    curve: cardinal\n---\nflowchart LR\n A --> B";
-        let Diagram::Flowchart(f) = parse(src).unwrap() else { unreachable!() };
-        assert_eq!(f.theme, Theme::Base);
-    }
-
-    #[test]
-    fn defaults_to_default_theme() {
-        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else { unreachable!() };
-        assert_eq!(f.theme, Theme::Default);
-    }
-
-    #[test]
-    fn no_frontmatter_is_unchanged() {
-        assert_eq!(strip_frontmatter("flowchart TD\n A --> B").lines().next(), Some("flowchart TD"));
-    }
-}
-
 /// The first whitespace-delimited keyword of the first non-blank, non-comment
 /// line — used to identify the diagram type.
 fn first_keyword(source: &str) -> Option<&str> {
@@ -262,4 +211,70 @@ fn first_keyword(source: &str) -> Option<&str> {
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with("%%"))
         .and_then(|l| l.split_whitespace().next())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_frontmatter_then_parses() {
+        let src = "---\ntitle: My Chart\nconfig:\n  flowchart:\n    curve: linear\n---\nflowchart TD\n A --> B";
+        let diagram = parse(src).unwrap();
+        let Diagram::Flowchart(f) = diagram else {
+            unreachable!()
+        };
+        assert_eq!(f.nodes.len(), 2);
+    }
+
+    #[test]
+    fn parses_handdrawn_look() {
+        let src = "---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(f.look, Look::HandDrawn);
+    }
+
+    #[test]
+    fn defaults_to_classic_look() {
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(f.look, Look::Classic);
+    }
+
+    #[test]
+    fn parses_theme_forest() {
+        let src = "---\nconfig:\n  theme: forest\n---\nflowchart TD\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(f.theme, Theme::Forest);
+    }
+
+    #[test]
+    fn parses_theme_base_with_other_config() {
+        let src = "---\ntitle: T\nconfig:\n  theme: base\n  flowchart:\n    curve: cardinal\n---\nflowchart LR\n A --> B";
+        let Diagram::Flowchart(f) = parse(src).unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(f.theme, Theme::Base);
+    }
+
+    #[test]
+    fn defaults_to_default_theme() {
+        let Diagram::Flowchart(f) = parse("flowchart TD\n A --> B").unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(f.theme, Theme::Default);
+    }
+
+    #[test]
+    fn no_frontmatter_is_unchanged() {
+        assert_eq!(
+            strip_frontmatter("flowchart TD\n A --> B").lines().next(),
+            Some("flowchart TD")
+        );
+    }
 }

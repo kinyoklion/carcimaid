@@ -116,7 +116,9 @@ fn replace_br(s: &str) -> String {
         if lower[i..].starts_with("<br") {
             // Must be a real <br…> tag: after "br" comes `>`, `/`, or whitespace.
             let after = &lower[i + 3..];
-            let is_tag = after.starts_with('>') || after.starts_with('/') || after.starts_with(char::is_whitespace);
+            let is_tag = after.starts_with('>')
+                || after.starts_with('/')
+                || after.starts_with(char::is_whitespace);
             if is_tag {
                 if let Some(gt) = s[i..].find('>') {
                     out.push('\n');
@@ -205,7 +207,11 @@ mod tests {
         let one = wrap_label("Is it ready?", WRAP_WIDTH, 16.0);
         assert_eq!(one, vec![vec!["Is", "it", "ready?"]]);
         // A long label wraps into multiple lines, each within the width.
-        let many = wrap_label("This is a fairly long label that should wrap", WRAP_WIDTH, 16.0);
+        let many = wrap_label(
+            "This is a fairly long label that should wrap",
+            WRAP_WIDTH,
+            16.0,
+        );
         assert!(many.len() >= 2, "expected wrapping, got {many:?}");
         for line in &many {
             assert!(line_width(line, 16.0) <= WRAP_WIDTH || line.len() == 1);

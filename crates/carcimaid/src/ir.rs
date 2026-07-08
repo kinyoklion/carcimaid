@@ -128,7 +128,10 @@ impl Theme {
                 line_color_css: "#0b0b0b",
                 text_color: "#333",
                 edge_label_bg: "hsl(-79.4117647059, 100%, 93.3333333333%)",
-                gradient_stops: Some(("hsl(40.5882352941, 60%, 83.3333333333%)", "hsl(-79.4117647059, 60%, 83.3333333333%)")),
+                gradient_stops: Some((
+                    "hsl(40.5882352941, 60%, 83.3333333333%)",
+                    "hsl(-79.4117647059, 60%, 83.3333333333%)",
+                )),
             },
             Theme::Forest => Palette {
                 node_bkg: "#cde498",
@@ -139,7 +142,10 @@ impl Theme {
                 line_color_css: "#000000",
                 text_color: "#000000",
                 edge_label_bg: "#e8e8e8",
-                gradient_stops: Some(("hsl(78.1578947368, 18.4615384615%, 64.5098039216%)", "hsl(98.961038961, 60%, 74.9019607843%)")),
+                gradient_stops: Some((
+                    "hsl(78.1578947368, 18.4615384615%, 64.5098039216%)",
+                    "hsl(98.961038961, 60%, 74.9019607843%)",
+                )),
             },
             Theme::Dark => Palette {
                 node_bkg: "#1f2020",

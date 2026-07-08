@@ -22,7 +22,6 @@ pub const MARKER_DEFS: &str = concat!(
     r##"<defs><marker id="my-svg-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke="black" stroke-width="1.5" fill="none"/></marker></defs>"##,
 );
 
-
 /// mermaid's default-theme sequence-diagram CSS, verbatim from the oracle.
 /// Presentation attributes on elements (e.g. `stroke="#999"` on lifelines) are
 /// overridden by these stylesheet rules, so emitting them is essential for

@@ -158,11 +158,7 @@ fn straight_hachure_lines(
         e1.ymin
             .partial_cmp(&e2.ymin)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                e1.x
-                    .partial_cmp(&e2.x)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
+            .then(e1.x.partial_cmp(&e2.x).unwrap_or(std::cmp::Ordering::Equal))
             .then(
                 e1.ymax
                     .partial_cmp(&e2.ymax)

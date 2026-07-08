@@ -38,7 +38,10 @@ impl Args {
                 "--artifacts" => a.artifacts = it.next().expect("--artifacts needs a path").into(),
                 "--filter" => a.filter = it.next(),
                 "--tolerance" => {
-                    a.tolerance = it.next().and_then(|s| s.parse().ok()).expect("--tolerance N")
+                    a.tolerance = it
+                        .next()
+                        .and_then(|s| s.parse().ok())
+                        .expect("--tolerance N")
                 }
                 "--no-oracle" => a.use_oracle = false,
                 "-v" | "--verbose" => a.verbose = true,
@@ -62,7 +65,7 @@ fn main() -> ExitCode {
     };
     let cases: Vec<_> = cases
         .into_iter()
-        .filter(|c| args.filter.as_ref().map_or(true, |f| c.id.contains(f)))
+        .filter(|c| args.filter.as_ref().is_none_or(|f| c.id.contains(f)))
         .collect();
 
     if cases.is_empty() {
@@ -88,7 +91,10 @@ fn main() -> ExitCode {
     let mut compared = 0usize;
     let mut errored = 0usize;
 
-    println!("{:<40} {:>10} {:>8} {:>8}", "case", "tag-sim", "diffs", "result");
+    println!(
+        "{:<40} {:>10} {:>8} {:>8}",
+        "case", "tag-sim", "diffs", "result"
+    );
     println!("{}", "-".repeat(70));
 
     for case in &cases {
@@ -98,7 +104,13 @@ fn main() -> ExitCode {
         let ours = match carcimaid::render_to_svg(&case.source) {
             Ok(svg) => svg,
             Err(e) => {
-                println!("{:<40} {:>10} {:>8} {:>8}", trunc(&case.id), "-", "-", "ERR");
+                println!(
+                    "{:<40} {:>10} {:>8} {:>8}",
+                    trunc(&case.id),
+                    "-",
+                    "-",
+                    "ERR"
+                );
                 if args.verbose {
                     println!("    carcimaid error: {e}");
                 }
@@ -109,14 +121,26 @@ fn main() -> ExitCode {
         let _ = std::fs::write(out_dir.join("carcimaid.svg"), &ours);
 
         if !oracle_ready {
-            println!("{:<40} {:>10} {:>8} {:>8}", trunc(&case.id), "-", "-", "ours");
+            println!(
+                "{:<40} {:>10} {:>8} {:>8}",
+                trunc(&case.id),
+                "-",
+                "-",
+                "ours"
+            );
             continue;
         }
 
         let reference = match oracle.render(&case.source, &out_dir.join("oracle")) {
             Ok(svg) => svg,
             Err(e) => {
-                println!("{:<40} {:>10} {:>8} {:>8}", trunc(&case.id), "-", "-", "ORACLE-ERR");
+                println!(
+                    "{:<40} {:>10} {:>8} {:>8}",
+                    trunc(&case.id),
+                    "-",
+                    "-",
+                    "ORACLE-ERR"
+                );
                 if args.verbose {
                     println!("    {e}");
                 }
@@ -129,7 +153,13 @@ fn main() -> ExitCode {
         let report = match (svgdiff::parse(&reference), svgdiff::parse(&ours)) {
             (Ok(r), Ok(c)) => svgdiff::compare(&r, &c, &opts),
             _ => {
-                println!("{:<40} {:>10} {:>8} {:>8}", trunc(&case.id), "-", "-", "PARSE-ERR");
+                println!(
+                    "{:<40} {:>10} {:>8} {:>8}",
+                    trunc(&case.id),
+                    "-",
+                    "-",
+                    "PARSE-ERR"
+                );
                 errored += 1;
                 continue;
             }

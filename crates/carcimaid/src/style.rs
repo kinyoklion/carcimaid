@@ -74,7 +74,9 @@ pub fn resolve(
     let mut order: Vec<String> = Vec::new();
     let mut map: HashMap<String, String> = HashMap::new();
     for decl in decls {
-        let Some((k, v)) = decl.split_once(':') else { continue };
+        let Some((k, v)) = decl.split_once(':') else {
+            continue;
+        };
         let (k, v) = (k.trim().to_string(), v.trim().to_string());
         if !map.contains_key(&k) {
             order.push(k.clone());
@@ -91,5 +93,8 @@ pub fn resolve(
             shape.push(decl);
         }
     }
-    Resolved { shape: shape.join(";"), label: label.join(";") }
+    Resolved {
+        shape: shape.join(";"),
+        label: label.join(";"),
+    }
 }

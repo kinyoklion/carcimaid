@@ -105,7 +105,10 @@ mod tests {
         let a = gen.rectangle(0.0, 0.0, 100.0, 100.0, &o);
         let b = gen.rectangle(0.0, 0.0, 100.0, 100.0, &o);
         assert_eq!(a.fill_path(None), b.fill_path(None));
-        assert!(!a.fill_path(None).is_empty(), "hachure fill should emit ops");
+        assert!(
+            !a.fill_path(None).is_empty(),
+            "hachure fill should emit ops"
+        );
         assert!(!a.stroke_path(None).is_empty());
     }
 

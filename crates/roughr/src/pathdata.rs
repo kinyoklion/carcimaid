@@ -46,15 +46,24 @@ fn is_command_letter(c: char) -> bool {
     matches!(
         c,
         'a' | 'A'
-            | 'c' | 'C'
-            | 'h' | 'H'
-            | 'l' | 'L'
-            | 'm' | 'M'
-            | 'q' | 'Q'
-            | 's' | 'S'
-            | 't' | 'T'
-            | 'v' | 'V'
-            | 'z' | 'Z'
+            | 'c'
+            | 'C'
+            | 'h'
+            | 'H'
+            | 'l'
+            | 'L'
+            | 'm'
+            | 'M'
+            | 'q'
+            | 'Q'
+            | 's'
+            | 'S'
+            | 't'
+            | 'T'
+            | 'v'
+            | 'V'
+            | 'z'
+            | 'Z'
     )
 }
 
@@ -209,7 +218,10 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
         let d = &seg.data;
         match seg.key {
             'M' => {
-                out.push(Segment { key: 'M', data: d.clone() });
+                out.push(Segment {
+                    key: 'M',
+                    data: d.clone(),
+                });
                 cx = d[0];
                 cy = d[1];
                 subx = d[0];
@@ -218,22 +230,34 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
             'm' => {
                 cx += d[0];
                 cy += d[1];
-                out.push(Segment { key: 'M', data: vec![cx, cy] });
+                out.push(Segment {
+                    key: 'M',
+                    data: vec![cx, cy],
+                });
                 subx = cx;
                 suby = cy;
             }
             'L' => {
-                out.push(Segment { key: 'L', data: d.clone() });
+                out.push(Segment {
+                    key: 'L',
+                    data: d.clone(),
+                });
                 cx = d[0];
                 cy = d[1];
             }
             'l' => {
                 cx += d[0];
                 cy += d[1];
-                out.push(Segment { key: 'L', data: vec![cx, cy] });
+                out.push(Segment {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
             }
             'C' => {
-                out.push(Segment { key: 'C', data: d.clone() });
+                out.push(Segment {
+                    key: 'C',
+                    data: d.clone(),
+                });
                 cx = d[4];
                 cy = d[5];
             }
@@ -248,7 +272,10 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
                 out.push(Segment { key: 'C', data: nd });
             }
             'Q' => {
-                out.push(Segment { key: 'Q', data: d.clone() });
+                out.push(Segment {
+                    key: 'Q',
+                    data: d.clone(),
+                });
                 cx = d[2];
                 cy = d[3];
             }
@@ -263,7 +290,10 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
                 out.push(Segment { key: 'Q', data: nd });
             }
             'A' => {
-                out.push(Segment { key: 'A', data: d.clone() });
+                out.push(Segment {
+                    key: 'A',
+                    data: d.clone(),
+                });
                 cx = d[5];
                 cy = d[6];
             }
@@ -276,23 +306,38 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
                 });
             }
             'H' => {
-                out.push(Segment { key: 'H', data: d.clone() });
+                out.push(Segment {
+                    key: 'H',
+                    data: d.clone(),
+                });
                 cx = d[0];
             }
             'h' => {
                 cx += d[0];
-                out.push(Segment { key: 'H', data: vec![cx] });
+                out.push(Segment {
+                    key: 'H',
+                    data: vec![cx],
+                });
             }
             'V' => {
-                out.push(Segment { key: 'V', data: d.clone() });
+                out.push(Segment {
+                    key: 'V',
+                    data: d.clone(),
+                });
                 cy = d[0];
             }
             'v' => {
                 cy += d[0];
-                out.push(Segment { key: 'V', data: vec![cy] });
+                out.push(Segment {
+                    key: 'V',
+                    data: vec![cy],
+                });
             }
             'S' => {
-                out.push(Segment { key: 'S', data: d.clone() });
+                out.push(Segment {
+                    key: 'S',
+                    data: d.clone(),
+                });
                 cx = d[2];
                 cy = d[3];
             }
@@ -307,17 +352,26 @@ pub fn absolutize(segments: &[Segment]) -> Vec<Segment> {
                 out.push(Segment { key: 'S', data: nd });
             }
             'T' => {
-                out.push(Segment { key: 'T', data: d.clone() });
+                out.push(Segment {
+                    key: 'T',
+                    data: d.clone(),
+                });
                 cx = d[0];
                 cy = d[1];
             }
             't' => {
                 cx += d[0];
                 cy += d[1];
-                out.push(Segment { key: 'T', data: vec![cx, cy] });
+                out.push(Segment {
+                    key: 'T',
+                    data: vec![cx, cy],
+                });
             }
             'Z' | 'z' => {
-                out.push(Segment { key: 'Z', data: vec![] });
+                out.push(Segment {
+                    key: 'Z',
+                    data: vec![],
+                });
                 cx = subx;
                 cy = suby;
             }
@@ -341,31 +395,46 @@ pub fn normalize(segments: &[Segment]) -> Vec<Segment> {
         let data = &seg.data;
         match seg.key {
             'M' => {
-                out.push(Segment { key: 'M', data: data.clone() });
+                out.push(Segment {
+                    key: 'M',
+                    data: data.clone(),
+                });
                 cx = data[0];
                 cy = data[1];
                 subx = data[0];
                 suby = data[1];
             }
             'C' => {
-                out.push(Segment { key: 'C', data: data.clone() });
+                out.push(Segment {
+                    key: 'C',
+                    data: data.clone(),
+                });
                 cx = data[4];
                 cy = data[5];
                 lcx = data[2];
                 lcy = data[3];
             }
             'L' => {
-                out.push(Segment { key: 'L', data: data.clone() });
+                out.push(Segment {
+                    key: 'L',
+                    data: data.clone(),
+                });
                 cx = data[0];
                 cy = data[1];
             }
             'H' => {
                 cx = data[0];
-                out.push(Segment { key: 'L', data: vec![cx, cy] });
+                out.push(Segment {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
             }
             'V' => {
                 cy = data[0];
-                out.push(Segment { key: 'L', data: vec![cx, cy] });
+                out.push(Segment {
+                    key: 'L',
+                    data: vec![cx, cy],
+                });
             }
             'S' => {
                 let (cx1, cy1) = if last_type == 'C' || last_type == 'S' {
@@ -457,7 +526,10 @@ pub fn normalize(segments: &[Segment]) -> Vec<Segment> {
                 }
             }
             'Z' | 'z' => {
-                out.push(Segment { key: 'Z', data: vec![] });
+                out.push(Segment {
+                    key: 'Z',
+                    data: vec![],
+                });
                 cx = subx;
                 cy = suby;
             }
@@ -520,7 +592,11 @@ fn arc_to_cubic_curves(
             r1 *= h;
             r2 *= h;
         }
-        let sign = if large_arc_flag == sweep_flag { -1.0 } else { 1.0 };
+        let sign = if large_arc_flag == sweep_flag {
+            -1.0
+        } else {
+            1.0
+        };
         let r1_pow = r1 * r1;
         let r2_pow = r2 * r2;
         let left = r1_pow * r2_pow - r1_pow * y * y - r2_pow * x * x;

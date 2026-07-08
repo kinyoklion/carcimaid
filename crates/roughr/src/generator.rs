@@ -7,9 +7,7 @@
 
 use crate::core::{Op, OpSet, OpSetType, OpType, Options, Point};
 use crate::pathdata::{absolutize, normalize, parse_path};
-use crate::renderer::{
-    self, ellipse_with_params, generate_ellipse_params, solid_fill_polygon,
-};
+use crate::renderer::{self, ellipse_with_params, generate_ellipse_params, solid_fill_polygon};
 
 /// rough.js `Drawable`.
 #[derive(Clone, Debug)]
@@ -106,7 +104,14 @@ impl Generator {
         Self::d("line", vec![set], o)
     }
 
-    pub fn rectangle(&self, x: f64, y: f64, width: f64, height: f64, options: &Options) -> Drawable {
+    pub fn rectangle(
+        &self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        options: &Options,
+    ) -> Drawable {
         let mut o = Self::prep(options);
         let outline = renderer::rectangle(x, y, width, height, &mut o);
         let mut paths = Vec::new();
@@ -208,7 +213,9 @@ impl Generator {
                 // Keep the shared PRNG state advanced consistently.
                 o.randomizer = fo.randomizer;
             } else {
-                paths.push(renderer::pattern_fill_arc(x, y, width, height, start, stop, &mut o));
+                paths.push(renderer::pattern_fill_arc(
+                    x, y, width, height, start, stop, &mut o,
+                ));
             }
         }
         if o.stroke != Options::NONE {
@@ -233,7 +240,10 @@ impl Generator {
             };
             let fill_shape = renderer::curve(points, &mut fo);
             o.randomizer = fo.randomizer;
-            paths.push(OpSet::new(OpSetType::FillPath, merged_shape(fill_shape.ops)));
+            paths.push(OpSet::new(
+                OpSetType::FillPath,
+                merged_shape(fill_shape.ops),
+            ));
         }
         if o.stroke != Options::NONE {
             paths.push(outline);
@@ -278,7 +288,10 @@ impl Generator {
                     };
                     let fill_shape = renderer::svg_path(&d_clean, &mut fo);
                     o.randomizer = fo.randomizer;
-                    paths.push(OpSet::new(OpSetType::FillPath, merged_shape(fill_shape.ops)));
+                    paths.push(OpSet::new(
+                        OpSetType::FillPath,
+                        merged_shape(fill_shape.ops),
+                    ));
                 } else {
                     paths.push(solid_fill_polygon(&sets, &mut o));
                 }
@@ -372,11 +385,7 @@ pub fn ops_to_path(op_set: &OpSet, fixed_decimals: Option<usize>) -> String {
     let mut path = String::new();
     for item in &op_set.ops {
         let d: Vec<f64> = match fixed_decimals {
-            Some(n) => item
-                .data
-                .iter()
-                .map(|v| round_fixed(*v, n))
-                .collect(),
+            Some(n) => item.data.iter().map(|v| round_fixed(*v, n)).collect(),
             None => item.data.clone(),
         };
         match item.op {

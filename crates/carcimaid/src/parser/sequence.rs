@@ -134,8 +134,11 @@ fn parse_statement(stmt: &str, d: &mut SequenceDiagram, cur_box: &mut Option<usi
     if stmt == "autonumber" || keyword(stmt, "autonumber").is_some() {
         let rest = keyword(stmt, "autonumber").unwrap_or("").trim();
         if rest == "off" || rest.is_empty() {
-            d.events
-                .push(SeqEvent::Autonumber(if rest == "off" { None } else { Some((1, 1)) }));
+            d.events.push(SeqEvent::Autonumber(if rest == "off" {
+                None
+            } else {
+                Some((1, 1))
+            }));
         } else {
             let mut it = rest.split_whitespace();
             let start = it.next().and_then(|s| s.parse().ok()).unwrap_or(1);
@@ -245,7 +248,14 @@ fn declare_participant(
             Some(i)
         }
         None => {
-            d.participants.push(Participant { id, label, is_actor, box_idx, wrap, shape });
+            d.participants.push(Participant {
+                id,
+                label,
+                is_actor,
+                box_idx,
+                wrap,
+                shape,
+            });
             Some(d.participants.len() - 1)
         }
     }
@@ -317,10 +327,34 @@ fn parse_box_header(rest: &str) -> (Option<String>, String) {
 fn is_color_name(w: &str) -> bool {
     matches!(
         w.to_ascii_lowercase().as_str(),
-        "transparent" | "red" | "green" | "blue" | "purple" | "yellow" | "orange" | "pink"
-            | "cyan" | "magenta" | "black" | "white" | "gray" | "grey" | "lightgreen"
-            | "lightblue" | "lightgrey" | "lightgray" | "lightyellow" | "lightpink"
-            | "aqua" | "teal" | "navy" | "olive" | "maroon" | "silver" | "gold" | "coral"
+        "transparent"
+            | "red"
+            | "green"
+            | "blue"
+            | "purple"
+            | "yellow"
+            | "orange"
+            | "pink"
+            | "cyan"
+            | "magenta"
+            | "black"
+            | "white"
+            | "gray"
+            | "grey"
+            | "lightgreen"
+            | "lightblue"
+            | "lightgrey"
+            | "lightgray"
+            | "lightyellow"
+            | "lightpink"
+            | "aqua"
+            | "teal"
+            | "navy"
+            | "olive"
+            | "maroon"
+            | "silver"
+            | "gold"
+            | "coral"
     )
 }
 
@@ -356,7 +390,12 @@ fn parse_note(rest: &str, d: &mut SequenceDiagram) {
     if actors.is_empty() {
         return;
     }
-    d.events.push(SeqEvent::Note(SeqNote { placement, actors, text, wrap }));
+    d.events.push(SeqEvent::Note(SeqNote {
+        placement,
+        actors,
+        text,
+        wrap,
+    }));
 }
 
 /// Parse a message statement: `LHS <arrow>[+/-] RHS : text`.
@@ -495,7 +534,8 @@ mod tests {
 
     #[test]
     fn basic_participants_and_messages() {
-        let d = parse("sequenceDiagram\n    Alice->>John: Hello John\n    John-->>Alice: Great!\n").unwrap();
+        let d = parse("sequenceDiagram\n    Alice->>John: Hello John\n    John-->>Alice: Great!\n")
+            .unwrap();
         assert_eq!(d.participants.len(), 2);
         assert_eq!(d.participants[0].id, "Alice");
         assert_eq!(d.participants[1].id, "John");
@@ -566,7 +606,12 @@ mod tests {
     #[test]
     fn blocks() {
         let d = parse("sequenceDiagram\nloop every day\nA->>B: x\nend\n").unwrap();
-        assert!(matches!(&d.events[0], SeqEvent::Block(BlockBoundary::LoopStart(l)) if l == "every day"));
-        assert!(matches!(d.events.last(), Some(SeqEvent::Block(BlockBoundary::LoopEnd))));
+        assert!(
+            matches!(&d.events[0], SeqEvent::Block(BlockBoundary::LoopStart(l)) if l == "every day")
+        );
+        assert!(matches!(
+            d.events.last(),
+            Some(SeqEvent::Block(BlockBoundary::LoopEnd))
+        ));
     }
 }

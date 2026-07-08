@@ -5,5 +5,8 @@ fn main() {
         let w = carcimaid::text::measure_width(&label, 16.0);
         println!("{w:10.4}  {label:?}");
     }
-    println!("line_height(16) = {:.4}", carcimaid::text::line_height(16.0));
+    println!(
+        "line_height(16) = {:.4}",
+        carcimaid::text::line_height(16.0)
+    );
 }

@@ -83,31 +83,85 @@ fn line_ops(
 
     if move_ {
         if overlay {
-            let mx = x1 + if preserve { 0.0 } else { offset_opt(half_offset, o, roughness_gain) };
-            let my = y1 + if preserve { 0.0 } else { offset_opt(half_offset, o, roughness_gain) };
+            let mx = x1
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(half_offset, o, roughness_gain)
+                };
+            let my = y1
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(half_offset, o, roughness_gain)
+                };
             ops.push(Op::new(OpType::Move, vec![mx, my]));
         } else {
-            let mx = x1 + if preserve { 0.0 } else { offset_opt(off, o, roughness_gain) };
-            let my = y1 + if preserve { 0.0 } else { offset_opt(off, o, roughness_gain) };
+            let mx = x1
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(off, o, roughness_gain)
+                };
+            let my = y1
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(off, o, roughness_gain)
+                };
             ops.push(Op::new(OpType::Move, vec![mx, my]));
         }
     }
 
     if overlay {
-        let d0 = mid_disp_x + x1 + (x2 - x1) * diverge_point + offset_opt(half_offset, o, roughness_gain);
-        let d1 = mid_disp_y + y1 + (y2 - y1) * diverge_point + offset_opt(half_offset, o, roughness_gain);
-        let d2 = mid_disp_x + x1 + 2.0 * (x2 - x1) * diverge_point + offset_opt(half_offset, o, roughness_gain);
-        let d3 = mid_disp_y + y1 + 2.0 * (y2 - y1) * diverge_point + offset_opt(half_offset, o, roughness_gain);
-        let d4 = x2 + if preserve { 0.0 } else { offset_opt(half_offset, o, roughness_gain) };
-        let d5 = y2 + if preserve { 0.0 } else { offset_opt(half_offset, o, roughness_gain) };
+        let d0 = mid_disp_x
+            + x1
+            + (x2 - x1) * diverge_point
+            + offset_opt(half_offset, o, roughness_gain);
+        let d1 = mid_disp_y
+            + y1
+            + (y2 - y1) * diverge_point
+            + offset_opt(half_offset, o, roughness_gain);
+        let d2 = mid_disp_x
+            + x1
+            + 2.0 * (x2 - x1) * diverge_point
+            + offset_opt(half_offset, o, roughness_gain);
+        let d3 = mid_disp_y
+            + y1
+            + 2.0 * (y2 - y1) * diverge_point
+            + offset_opt(half_offset, o, roughness_gain);
+        let d4 = x2
+            + if preserve {
+                0.0
+            } else {
+                offset_opt(half_offset, o, roughness_gain)
+            };
+        let d5 = y2
+            + if preserve {
+                0.0
+            } else {
+                offset_opt(half_offset, o, roughness_gain)
+            };
         ops.push(Op::new(OpType::BCurveTo, vec![d0, d1, d2, d3, d4, d5]));
     } else {
         let d0 = mid_disp_x + x1 + (x2 - x1) * diverge_point + offset_opt(off, o, roughness_gain);
         let d1 = mid_disp_y + y1 + (y2 - y1) * diverge_point + offset_opt(off, o, roughness_gain);
-        let d2 = mid_disp_x + x1 + 2.0 * (x2 - x1) * diverge_point + offset_opt(off, o, roughness_gain);
-        let d3 = mid_disp_y + y1 + 2.0 * (y2 - y1) * diverge_point + offset_opt(off, o, roughness_gain);
-        let d4 = x2 + if preserve { 0.0 } else { offset_opt(off, o, roughness_gain) };
-        let d5 = y2 + if preserve { 0.0 } else { offset_opt(off, o, roughness_gain) };
+        let d2 =
+            mid_disp_x + x1 + 2.0 * (x2 - x1) * diverge_point + offset_opt(off, o, roughness_gain);
+        let d3 =
+            mid_disp_y + y1 + 2.0 * (y2 - y1) * diverge_point + offset_opt(off, o, roughness_gain);
+        let d4 = x2
+            + if preserve {
+                0.0
+            } else {
+                offset_opt(off, o, roughness_gain)
+            };
+        let d5 = y2
+            + if preserve {
+                0.0
+            } else {
+                offset_opt(off, o, roughness_gain)
+            };
         ops.push(Op::new(OpType::BCurveTo, vec![d0, d1, d2, d3, d4, d5]));
     }
     ops
@@ -259,7 +313,12 @@ fn curve_ops(points: &[Point], close_point: Option<Point>, o: &mut Options) -> V
         ops.push(Op::new(
             OpType::BCurveTo,
             vec![
-                points[1][0], points[1][1], points[2][0], points[2][1], points[2][0], points[2][1],
+                points[1][0],
+                points[1][1],
+                points[2][0],
+                points[2][1],
+                points[2][0],
+                points[2][1],
             ],
         ));
     } else if len == 2 {
@@ -327,12 +386,7 @@ pub fn generate_ellipse_params(width: f64, height: f64, o: &mut Options) -> Elli
 }
 
 /// rough.js `ellipseWithParams`.
-pub fn ellipse_with_params(
-    x: f64,
-    y: f64,
-    o: &mut Options,
-    p: &EllipseParams,
-) -> EllipseResult {
+pub fn ellipse_with_params(x: f64, y: f64, o: &mut Options, p: &EllipseParams) -> EllipseResult {
     // overlap arg: increment * _offset(0.1, _offset(0.4, 1, o), o)
     let inner = offset(0.4, 1.0, o, 1.0);
     let overlap = p.increment * offset(0.1, inner, o, 1.0);
@@ -373,10 +427,7 @@ fn compute_ellipse_points(
 
     if core_only {
         increment /= 4.0;
-        all_points.push([
-            cx + rx * (-increment).cos(),
-            cy + ry * (-increment).sin(),
-        ]);
+        all_points.push([cx + rx * (-increment).cos(), cy + ry * (-increment).sin()]);
         let mut angle = 0.0;
         while angle <= PI * 2.0 {
             let p = [cx + rx * angle.cos(), cy + ry * angle.sin()];
@@ -544,23 +595,33 @@ fn bezier_to(
         if i == 0 {
             ops.push(Op::new(OpType::Move, vec![current[0], current[1]]));
         } else {
-            let mx = current[0] + if preserve { 0.0 } else { offset_opt(ros[0], o, 1.0) };
-            let my = current[1] + if preserve { 0.0 } else { offset_opt(ros[0], o, 1.0) };
+            let mx = current[0]
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(ros[0], o, 1.0)
+                };
+            let my = current[1]
+                + if preserve {
+                    0.0
+                } else {
+                    offset_opt(ros[0], o, 1.0)
+                };
             ops.push(Op::new(OpType::Move, vec![mx, my]));
         }
         let f = if preserve {
             [x, y]
         } else {
-            [x + offset_opt(ros[i], o, 1.0), y + offset_opt(ros[i], o, 1.0)]
+            [
+                x + offset_opt(ros[i], o, 1.0),
+                y + offset_opt(ros[i], o, 1.0),
+            ]
         };
         let c0 = x1 + offset_opt(ros[i], o, 1.0);
         let c1 = y1 + offset_opt(ros[i], o, 1.0);
         let c2 = x2 + offset_opt(ros[i], o, 1.0);
         let c3 = y2 + offset_opt(ros[i], o, 1.0);
-        ops.push(Op::new(
-            OpType::BCurveTo,
-            vec![c0, c1, c2, c3, f[0], f[1]],
-        ));
+        ops.push(Op::new(OpType::BCurveTo, vec![c0, c1, c2, c3, f[0], f[1]]));
     }
     ops
 }
@@ -579,7 +640,9 @@ pub fn svg_path(path: &str, o: &mut Options) -> OpSet {
                 first = [data[0], data[1]];
             }
             'L' => {
-                ops.extend(double_line(current[0], current[1], data[0], data[1], o, false));
+                ops.extend(double_line(
+                    current[0], current[1], data[0], data[1], o, false,
+                ));
                 current = [data[0], data[1]];
             }
             'C' => {
@@ -593,7 +656,9 @@ pub fn svg_path(path: &str, o: &mut Options) -> OpSet {
                 current = [x, y];
             }
             'Z' => {
-                ops.extend(double_line(current[0], current[1], first[0], first[1], o, false));
+                ops.extend(double_line(
+                    current[0], current[1], first[0], first[1], o, false,
+                ));
                 current = [first[0], first[1]];
             }
             _ => {}

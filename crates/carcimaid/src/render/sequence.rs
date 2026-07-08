@@ -95,9 +95,30 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         if a.is_actor {
             out.push_str("<g></g>");
         } else if let Some(shape) = &a.shape {
-            draw_shape(&mut out, shape, a.cx(), a.x, fy, a.width, a.height, &a.label_lines, &a.id, false);
+            draw_shape(
+                &mut out,
+                shape,
+                a.cx(),
+                a.x,
+                fy,
+                a.width,
+                a.height,
+                &a.label_lines,
+                &a.id,
+                false,
+            );
         } else {
-            actor_box(&mut out, a.cx(), a.x, fy, a.width, a.height, &a.label_lines, &a.id, false);
+            actor_box(
+                &mut out,
+                a.cx(),
+                a.x,
+                fy,
+                a.width,
+                a.height,
+                &a.label_lines,
+                &a.id,
+                false,
+            );
         }
     }
     // 2. Top actors with lifelines, reverse participant order (id carries the
@@ -127,9 +148,30 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
                 id = esc(&a.id),
             );
             if let Some(shape) = &a.shape {
-                draw_shape(&mut out, shape, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
+                draw_shape(
+                    &mut out,
+                    shape,
+                    cx,
+                    a.x,
+                    a.starty,
+                    a.width,
+                    a.height,
+                    &a.label_lines,
+                    &a.id,
+                    true,
+                );
             } else {
-                actor_box(&mut out, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
+                actor_box(
+                    &mut out,
+                    cx,
+                    a.x,
+                    a.starty,
+                    a.width,
+                    a.height,
+                    &a.label_lines,
+                    &a.id,
+                    true,
+                );
             }
             out.push_str("</g>");
         }
@@ -158,7 +200,11 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
     let mut pre: Vec<(usize, PreElem)> = Vec::new();
     pre.extend(s.notes.iter().map(|nt| (nt.id, PreElem::Note(nt))));
     pre.extend(s.blocks.iter().map(|b| (b.id, PreElem::Block(b))));
-    pre.extend(s.activations.iter().map(|a| (a.order, PreElem::Activation(a))));
+    pre.extend(
+        s.activations
+            .iter()
+            .map(|a| (a.order, PreElem::Activation(a))),
+    );
     pre.sort_by_key(|(id, _)| *id);
     for (_, el) in &pre {
         match el {
@@ -199,15 +245,31 @@ const ACTOR_GLYPH_H: f64 = 80.0;
 
 /// Emit an `actor`-type stick-figure glyph (head/torso/arms/legs + label),
 /// matching mermaid's `drawActorTypeActor`. `top` selects the top/bottom class.
-fn actor_glyph(out: &mut String, cx: f64, y: f64, lines: &[String], id: &str, top: bool, n_idx: usize) {
-    let class = if top { "actor-man actor-top" } else { "actor-man actor-bottom" };
+fn actor_glyph(
+    out: &mut String,
+    cx: f64,
+    y: f64,
+    lines: &[String],
+    id: &str,
+    top: bool,
+    n_idx: usize,
+) {
+    let class = if top {
+        "actor-man actor-top"
+    } else {
+        "actor-man actor-bottom"
+    };
     // The `data-*` participant attrs are only on the top glyph.
     let data = if top {
         r#" data-et="participant" data-type="actor""#
     } else {
         ""
     };
-    let did = if top { format!(r#" data-id="{}""#, esc(id)) } else { String::new() };
+    let did = if top {
+        format!(r#" data-id="{}""#, esc(id))
+    } else {
+        String::new()
+    };
     let _ = write!(
         out,
         r#"<g class="{class}" name="{name}"{data}{did} style="stroke: rgb(147, 112, 219);">"#,
@@ -220,15 +282,28 @@ fn actor_glyph(out: &mut String, cx: f64, y: f64, lines: &[String], id: &str, to
     let _ = write!(
         out,
         r#"<line id="actor-man-torso{n}" x1="{cx}" y1="{y1}" x2="{cx}" y2="{y2}"/>"#,
-        n = n_idx, cx = n(cx), y1 = n(y + 25.0), y2 = n(y + 45.0),
+        n = n_idx,
+        cx = n(cx),
+        y1 = n(y + 25.0),
+        y2 = n(y + 45.0),
     );
     let _ = write!(
         out,
         r#"<line id="actor-man-arms{n}" x1="{x1}" y1="{yy}" x2="{x2}" y2="{yy}"/>"#,
-        n = n_idx, x1 = n(cx - 18.0), x2 = n(cx + 18.0), yy = n(y + 33.0),
+        n = n_idx,
+        x1 = n(cx - 18.0),
+        x2 = n(cx + 18.0),
+        yy = n(y + 33.0),
     );
     let l = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64| {
-        let _ = write!(out, r#"<line x1="{}" y1="{}" x2="{}" y2="{}"/>"#, n(x1), n(y1), n(x2), n(y2));
+        let _ = write!(
+            out,
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+            n(x1),
+            n(y1),
+            n(x2),
+            n(y2)
+        );
     };
     l(out, cx - 18.0, y + 60.0, cx, y + 45.0); // left leg
     l(out, cx, y + 45.0, cx + 16.0, y + 60.0); // right leg
@@ -256,7 +331,11 @@ fn actor_box(
     id: &str,
     top: bool,
 ) {
-    let class = if top { "actor actor-top" } else { "actor actor-bottom" };
+    let class = if top {
+        "actor actor-top"
+    } else {
+        "actor actor-bottom"
+    };
     if !top {
         out.push_str("<g>");
     }
@@ -295,7 +374,11 @@ fn draw_shape(
     id: &str,
     top: bool,
 ) {
-    let cls = if top { "actor actor-top" } else { "actor actor-bottom" };
+    let cls = if top {
+        "actor actor-top"
+    } else {
+        "actor actor-bottom"
+    };
     let fill = r##"fill="#eaeaea" stroke="#666""##;
     if !top {
         out.push_str("<g>");
@@ -304,14 +387,22 @@ fn draw_shape(
         let _ = write!(
             out,
             r#"<circle cx="{cx}" cy="{cy}" r="{r}" {f} name="{id}" class="{cls}"/>"#,
-            cx = n(ccx), cy = n(ccy), r = n(r), f = fill, id = esc(id), cls = cls,
+            cx = n(ccx),
+            cy = n(ccy),
+            r = n(r),
+            f = fill,
+            id = esc(id),
+            cls = cls,
         );
     };
     let line = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64| {
         let _ = write!(
             out,
             r##"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#666" stroke-width="1"/>"##,
-            x1 = n(x1), y1 = n(y1), x2 = n(x2), y2 = n(y2),
+            x1 = n(x1),
+            y1 = n(y1),
+            x2 = n(x2),
+            y2 = n(y2),
         );
     };
     match shape {
@@ -322,15 +413,35 @@ fn draw_shape(
             let rx = ry / (2.5 + h / 50.0);
             let body = format!(
                 "M {sx},{y} a {rx},{ry} 0 0 0 0,{h} h {hw} a {rx},{ry} 0 0 0 0,{nh} Z",
-                sx = n(x + rx), y = n(y), rx = n(rx), ry = n(ry),
-                h = n(h), hw = n(w - 2.0 * rx), nh = n(-h),
+                sx = n(x + rx),
+                y = n(y),
+                rx = n(rx),
+                ry = n(ry),
+                h = n(h),
+                hw = n(w - 2.0 * rx),
+                nh = n(-h),
             );
             let cap = format!(
                 "M {sx},{y} a {rx},{ry} 0 0 0 0,{h}",
-                sx = n(x + w - rx), y = n(y), rx = n(rx), ry = n(ry), h = n(h),
+                sx = n(x + w - rx),
+                y = n(y),
+                rx = n(rx),
+                ry = n(ry),
+                h = n(h),
             );
-            let _ = write!(out, r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#, d = body, f = fill, id = esc(id), cls = cls);
-            let _ = write!(out, r##"<path d="{d}" fill="none" stroke="#666"/>"##, d = cap);
+            let _ = write!(
+                out,
+                r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#,
+                d = body,
+                f = fill,
+                id = esc(id),
+                cls = cls
+            );
+            let _ = write!(
+                out,
+                r##"<path d="{d}" fill="none" stroke="#666"/>"##,
+                d = cap
+            );
             actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
         }
         "collections" => {
@@ -338,12 +449,24 @@ fn draw_shape(
             let _ = write!(
                 out,
                 r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" {f} name="{id}" class="{cls}"/>"#,
-                x = n(x + 6.0), y = n(y - 6.0), w = n(w), h = n(h), f = fill, id = esc(id), cls = cls,
+                x = n(x + 6.0),
+                y = n(y - 6.0),
+                w = n(w),
+                h = n(h),
+                f = fill,
+                id = esc(id),
+                cls = cls,
             );
             let _ = write!(
                 out,
                 r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" {f} name="{id}" class="{cls}"/>"#,
-                x = n(x), y = n(y), w = n(w), h = n(h), f = fill, id = esc(id), cls = cls,
+                x = n(x),
+                y = n(y),
+                w = n(w),
+                h = n(h),
+                f = fill,
+                id = esc(id),
+                cls = cls,
             );
             actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
         }
@@ -358,10 +481,17 @@ fn draw_shape(
                 l = n(l), t = n(ty + ry), rw = n(rw), ry = n(ry),
                 d2 = n(rw * 2.0), nd2 = n(-rw * 2.0), bh = n(bh), nbh = n(-bh),
             );
-            let _ = write!(out, r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#, d = d, f = fill, id = esc(id), cls = cls);
+            let _ = write!(
+                out,
+                r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#,
+                d = d,
+                f = fill,
+                id = esc(id),
+                cls = cls
+            );
             actor_label(out, cx, y + h - 8.0, lines, "actor actor-box");
         }
-        "boundary" | "control" | "entity" | _ => {
+        _ => {
             let (ccy, r) = (y + 18.0, 16.0);
             match shape {
                 "boundary" => {
@@ -448,13 +578,25 @@ fn activation_bar(out: &mut String, a: &crate::layout::sequence::PlacedActivatio
 /// `labelBox` polygon + `labelText`, the `loopText` condition, and section
 /// titles — matching mermaid's `drawLoop`.
 fn block_box(out: &mut String, b: &crate::layout::sequence::PlacedBlock) {
-    let _ = write!(out, r#"<g data-et="control-structure" data-id="i{}">"#, b.id);
+    let _ = write!(
+        out,
+        r#"<g data-et="control-structure" data-id="i{}">"#,
+        b.id
+    );
     let line = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64, dashed: bool| {
-        let style = if dashed { r#" style="stroke-dasharray: 3, 3;""# } else { "" };
+        let style = if dashed {
+            r#" style="stroke-dasharray: 3, 3;""#
+        } else {
+            ""
+        };
         let _ = write!(
             out,
             r#"<line x1="{}" y1="{}" x2="{}" y2="{}" class="loopLine"{}/>"#,
-            n(x1), n(y1), n(x2), n(y2), style,
+            n(x1),
+            n(y1),
+            n(x2),
+            n(y2),
+            style,
         );
     };
     // Box border: top, right, bottom, left.
@@ -536,11 +678,7 @@ fn genpoints(x: f64, y: f64, w: f64, h: f64, cut: f64) -> String {
 /// Emit a note: `<g data-et="note">` wrapping a `note` rect + `noteText`.
 fn note_box(out: &mut String, note: &crate::layout::sequence::PlacedNote) {
     let cx = note.x + note.width / 2.0;
-    let _ = write!(
-        out,
-        r#"<g data-et="note" data-id="i{id}">"#,
-        id = note.id,
-    );
+    let _ = write!(out, r#"<g data-et="note" data-id="i{id}">"#, id = note.id,);
     let _ = write!(
         out,
         concat!(
@@ -590,7 +728,11 @@ fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequenc
     }
 
     let dotted = m.arrow.is_dotted();
-    let class = if dotted { "messageLine1" } else { "messageLine0" };
+    let class = if dotted {
+        "messageLine1"
+    } else {
+        "messageLine0"
+    };
     let style = if dotted {
         r#" style="stroke-dasharray: 3, 3; fill: none;""#
     } else {
@@ -662,7 +804,7 @@ fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequenc
 
     if let Some(seq) = m.seq_num {
         // Autonumber circle (drawn by the zero-length line's marker) + number.
-        let ax = if m.from <= m.to { m.start_x } else { m.start_x };
+        let ax = m.start_x;
         let fs = if seq >= 100000 {
             "7px"
         } else if seq >= 1000 {

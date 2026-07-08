@@ -91,15 +91,35 @@ pub struct Difference {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiffKind {
-    TagMismatch { reference: String, candidate: String },
+    TagMismatch {
+        reference: String,
+        candidate: String,
+    },
     /// A child present in the reference has no counterpart in the candidate.
-    ElementMissing { key: String },
+    ElementMissing {
+        key: String,
+    },
     /// A child present in the candidate has no counterpart in the reference.
-    ElementExtra { key: String },
-    TextMismatch { reference: String, candidate: String },
-    AttrMissing { name: String, reference: String },
-    AttrExtra { name: String, candidate: String },
-    AttrValueMismatch { name: String, reference: String, candidate: String },
+    ElementExtra {
+        key: String,
+    },
+    TextMismatch {
+        reference: String,
+        candidate: String,
+    },
+    AttrMissing {
+        name: String,
+        reference: String,
+    },
+    AttrExtra {
+        name: String,
+        candidate: String,
+    },
+    AttrValueMismatch {
+        name: String,
+        reference: String,
+        candidate: String,
+    },
 }
 
 /// The result of comparing two SVG trees.
@@ -138,11 +158,7 @@ impl Default for Options {
             // id/class are non-deterministic or cosmetic; data-points is a base64
             // blob duplicating the path geometry already checked via `d`. `style`
             // is compared, but as a normalized property set (see diff_attrs).
-            ignore_attrs: vec![
-                "id".into(),
-                "class".into(),
-                "data-points".into(),
-            ],
+            ignore_attrs: vec!["id".into(), "class".into(), "data-points".into()],
             max_differences: 50,
         }
     }
@@ -194,8 +210,16 @@ fn diff_el(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Difference>
 /// still *matched* (and reported as a `TextMismatch`) rather than shown as a
 /// missing/extra pair.
 fn child_key(el: &El) -> String {
-    let class = el.attrs.get("class").and_then(|c| c.split_whitespace().next()).unwrap_or("");
-    let id = el.attrs.get("id").map(|i| strip_id_counter(i)).unwrap_or("");
+    let class = el
+        .attrs
+        .get("class")
+        .and_then(|c| c.split_whitespace().next())
+        .unwrap_or("");
+    let id = el
+        .attrs
+        .get("id")
+        .map(|i| strip_id_counter(i))
+        .unwrap_or("");
     format!("{}|{}|{}", el.tag, class, id)
 }
 
@@ -237,10 +261,16 @@ fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Diffe
     }
 
     let missing = |out: &mut Vec<Difference>, k: &str| {
-        out.push(Difference { path: path.to_string(), kind: DiffKind::ElementMissing { key: k.to_string() } });
+        out.push(Difference {
+            path: path.to_string(),
+            kind: DiffKind::ElementMissing { key: k.to_string() },
+        });
     };
     let extra = |out: &mut Vec<Difference>, k: &str| {
-        out.push(Difference { path: path.to_string(), kind: DiffKind::ElementExtra { key: k.to_string() } });
+        out.push(Difference {
+            path: path.to_string(),
+            kind: DiffKind::ElementExtra { key: k.to_string() },
+        });
     };
 
     let (mut i, mut j) = (0, 0);
@@ -250,7 +280,14 @@ fn diff_children(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Diffe
         }
         if rk[i] == ck[j] {
             let child_path = format!("{path}/{}[{i}]", r.children[i].tag);
-            diff_el(&r.children[i], &c.children[j], &child_path, opts, out, child_rough);
+            diff_el(
+                &r.children[i],
+                &c.children[j],
+                &child_path,
+                opts,
+                out,
+                child_rough,
+            );
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
@@ -345,14 +382,20 @@ fn diff_attrs(r: &El, c: &El, path: &str, opts: &Options, out: &mut Vec<Differen
             if !style_eq("", cv) {
                 out.push(Difference {
                     path: path.to_string(),
-                    kind: DiffKind::AttrExtra { name: name.clone(), candidate: cv.clone() },
+                    kind: DiffKind::AttrExtra {
+                        name: name.clone(),
+                        candidate: cv.clone(),
+                    },
                 });
             }
             continue;
         }
         out.push(Difference {
             path: path.to_string(),
-            kind: DiffKind::AttrExtra { name: name.clone(), candidate: cv.clone() },
+            kind: DiffKind::AttrExtra {
+                name: name.clone(),
+                candidate: cv.clone(),
+            },
         });
     }
 }
@@ -449,8 +492,7 @@ fn path_anchor_points(d: &str) -> Vec<(f64, f64)> {
             }
             let is_num = ch.is_ascii_digit() || ch == '.' || ch == 'e' || ch == 'E';
             // A '-'/'+' starts a new number unless it's an exponent sign.
-            let is_sign = (ch == '-' || ch == '+')
-                && !(cur.ends_with('e') || cur.ends_with('E'));
+            let is_sign = (ch == '-' || ch == '+') && !(cur.ends_with('e') || cur.ends_with('E'));
             if is_sign && !cur.is_empty() {
                 if let Ok(v) = cur.parse() {
                     nums.push(v);
@@ -549,12 +591,8 @@ fn tokenize(s: &str) -> (Vec<String>, Vec<f64>) {
     };
 
     for ch in s.chars() {
-        let is_num_char = ch.is_ascii_digit()
-            || ch == '.'
-            || ch == '-'
-            || ch == '+'
-            || ch == 'e'
-            || ch == 'E';
+        let is_num_char =
+            ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+' || ch == 'e' || ch == 'E';
         if is_num_char && (ch.is_ascii_digit() || !num.is_empty() || ch == '-' || ch == '.') {
             if !cur.is_empty() {
                 skeleton.push(std::mem::take(&mut cur));
@@ -613,9 +651,15 @@ mod tests {
     fn numeric_tolerance_applies() {
         let a = parse(r#"<svg><rect x="10.0" y="20.0"/></svg>"#).unwrap();
         let b = parse(r#"<svg><rect x="10.4" y="20.3"/></svg>"#).unwrap();
-        let opts = Options { numeric_tolerance: 0.5, ..Options::default() };
+        let opts = Options {
+            numeric_tolerance: 0.5,
+            ..Options::default()
+        };
         assert!(compare(&a, &b, &opts).is_match());
-        let strict = Options { numeric_tolerance: 0.1, ..Options::default() };
+        let strict = Options {
+            numeric_tolerance: 0.1,
+            ..Options::default()
+        };
         assert!(!compare(&a, &b, &strict).is_match());
     }
 
@@ -624,7 +668,10 @@ mod tests {
         let a = parse(r#"<svg><text>Hello</text></svg>"#).unwrap();
         let b = parse(r#"<svg><text>World</text></svg>"#).unwrap();
         let report = compare(&a, &b, &Options::default());
-        assert!(matches!(report.differences[0].kind, DiffKind::TextMismatch { .. }));
+        assert!(matches!(
+            report.differences[0].kind,
+            DiffKind::TextMismatch { .. }
+        ));
     }
 
     #[test]
@@ -674,7 +721,10 @@ mod tests {
     fn path_data_compared_numerically() {
         let a = parse(r#"<svg><path d="M0,0 L10,10"/></svg>"#).unwrap();
         let b = parse(r#"<svg><path d="M0,0 L10.4,9.7"/></svg>"#).unwrap();
-        let opts = Options { numeric_tolerance: 0.5, ..Options::default() };
+        let opts = Options {
+            numeric_tolerance: 0.5,
+            ..Options::default()
+        };
         assert!(compare(&a, &b, &opts).is_match());
     }
 }

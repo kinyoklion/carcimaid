@@ -42,7 +42,8 @@ pub fn parse(source: &str) -> Result<Flowchart> {
         }
         if let Some(rest) = stmt.strip_prefix("accDescr") {
             let rest = rest.trim();
-            let text = if let Some(inner) = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
+            let text = if let Some(inner) = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}'))
+            {
                 inner.trim() // multi-line `accDescr { … }`
             } else {
                 rest.trim_start_matches(':').trim()
@@ -64,7 +65,10 @@ pub fn parse(source: &str) -> Result<Flowchart> {
             stack.push(chart.subgraphs.len() - 1);
         } else if stmt == "end" {
             stack.pop();
-        } else if let Some(dir) = stmt.strip_prefix("direction").filter(|r| r.starts_with(char::is_whitespace)) {
+        } else if let Some(dir) = stmt
+            .strip_prefix("direction")
+            .filter(|r| r.starts_with(char::is_whitespace))
+        {
             // `direction XX` inside a subgraph sets that subgraph's direction. A
             // top-level `direction` does NOT override the header (mermaid keeps
             // the header direction for the root), so it is ignored here.
@@ -179,7 +183,9 @@ fn is_directive_stmt(stmt: &str) -> bool {
 
 /// If `stmt` begins with keyword `kw` followed by whitespace, return the rest.
 fn strip_kw<'a>(stmt: &'a str, kw: &str) -> Option<&'a str> {
-    stmt.strip_prefix(kw).filter(|r| r.starts_with(char::is_whitespace)).map(str::trim)
+    stmt.strip_prefix(kw)
+        .filter(|r| r.starts_with(char::is_whitespace))
+        .map(str::trim)
 }
 
 /// Split a comma-separated CSS declaration list into trimmed `k:v` strings,
@@ -187,7 +193,13 @@ fn strip_kw<'a>(stmt: &'a str, kw: &str) -> Option<&'a str> {
 fn split_css(props: &str) -> Vec<String> {
     props
         .split(',')
-        .map(|p| p.replace("!important", "").trim().trim_end_matches(';').trim().to_string())
+        .map(|p| {
+            p.replace("!important", "")
+                .trim()
+                .trim_end_matches(';')
+                .trim()
+                .to_string()
+        })
         .filter(|p| !p.is_empty())
         .collect()
 }
@@ -200,7 +212,11 @@ fn parse_class_def(rest: &str, chart: &mut Flowchart) {
     };
     let decls = split_css(props);
     for name in names.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-        chart.class_defs.entry(name.to_string()).or_default().extend(decls.iter().cloned());
+        chart
+            .class_defs
+            .entry(name.to_string())
+            .or_default()
+            .extend(decls.iter().cloned());
     }
 }
 
@@ -239,7 +255,9 @@ fn parse_link_style(rest: &str, chart: &mut Flowchart) {
     };
     // Drop a trailing `interpolate <fn>` clause if present before the props.
     let props = props.strip_prefix("interpolate").map_or(props, |r| {
-        r.trim_start().split_once(char::is_whitespace).map_or("", |(_, p)| p)
+        r.trim_start()
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, p)| p)
     });
     let decls = split_css(props);
     if decls.is_empty() {
@@ -250,7 +268,10 @@ fn parse_link_style(rest: &str, chart: &mut Flowchart) {
         // to it rather than replacing it (mermaid concatenates default + index).
         chart.link_style_default = decls;
     } else {
-        for idx in spec.split(',').filter_map(|i| i.trim().parse::<usize>().ok()) {
+        for idx in spec
+            .split(',')
+            .filter_map(|i| i.trim().parse::<usize>().ok())
+        {
             if let Some(e) = chart.edges.get_mut(idx) {
                 e.link_style = decls.clone();
             }
@@ -279,7 +300,10 @@ fn parse_subgraph_header(body: &str, index: usize) -> (String, String) {
         return (format!("subGraph{index}"), String::new());
     }
     if let Some(open) = body.find('[') {
-        if let Some(inner) = body[open..].strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+        if let Some(inner) = body[open..]
+            .strip_prefix('[')
+            .and_then(|r| r.strip_suffix(']'))
+        {
             let id = body[..open].trim().to_string();
             return (id, unquote(inner).to_string());
         }
@@ -306,7 +330,12 @@ fn parse_statement(stmt: &str, chart: &mut Flowchart, current: Option<usize>) {
     let (endpoints, ops) = split_chain(stmt);
     let groups: Vec<Vec<usize>> = endpoints
         .iter()
-        .map(|ep| split_group(ep).iter().map(|n| ensure_node(chart, n, current)).collect())
+        .map(|ep| {
+            split_group(ep)
+                .iter()
+                .map(|n| ensure_node(chart, n, current))
+                .collect()
+        })
         .collect();
 
     if ops.is_empty() {
@@ -423,7 +452,9 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                 // `o`/`x` start arrows are only valid at a token boundary, else
                 // they'd match the trailing letter of an id like `foo-->` / `box-->`.
                 let boundary = cur.chars().last().is_none_or(char::is_whitespace);
-                if let Some((len, style, start, end, mid, length)) = detect_link(&stmt[i..], boundary) {
+                if let Some((len, style, start, end, mid, length)) =
+                    detect_link(&stmt[i..], boundary)
+                {
                     endpoints.push(cur.trim().to_string());
                     cur = String::new();
                     i += len;
@@ -433,9 +464,8 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                         mid
                     } else {
                         let rest = stmt[i..].trim_start();
-                        if rest.starts_with('|') {
+                        if let Some(after_bar) = rest.strip_prefix('|') {
                             let consumed = stmt.len() - rest.len();
-                            let after_bar = &rest[1..];
                             if let Some(bar) = after_bar.find('|') {
                                 i = consumed + 1 + bar + 1;
                                 Some(after_bar[..bar].trim().to_string())
@@ -446,7 +476,13 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
                             None
                         }
                     };
-                    ops.push(EdgeOp { style, start, end, label, length });
+                    ops.push(EdgeOp {
+                        style,
+                        start,
+                        end,
+                        label,
+                        length,
+                    });
                 } else {
                     // The odd/flag shape `id>text]` opens with `>` and closes
                     // with `]`; count it as a bracket so the trailing `]` keeps
@@ -475,7 +511,17 @@ fn split_chain(stmt: &str) -> (Vec<String>, Vec<EdgeOp>) {
 /// (`>`/`x`/`o`), and inline middle text. The rank span follows mermaid's
 /// `destructEndLink`: dotted links span their dot count, solid/thick links span
 /// `dashes - 1` (so `-->` is 1, `--->` 2, `---->` 3, …), clamped to at least 1.
-fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, ArrowType, Option<String>, usize)> {
+fn detect_link(
+    s: &str,
+    boundary: bool,
+) -> Option<(
+    usize,
+    EdgeStyle,
+    ArrowType,
+    ArrowType,
+    Option<String>,
+    usize,
+)> {
     let b = s.as_bytes();
     let mut i = 0;
 
@@ -508,8 +554,8 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
     // Dotted link. mermaid's shaft is `-?\.+-` (leading dash optional, dots
     // repeatable), so `-.->`, `.->`, `<.->`, and longer `-..->` all parse. The
     // rank span is the dot count.
-    let dotted = b.get(i) == Some(&b'.')
-        || (b.get(i) == Some(&b'-') && b.get(i + 1) == Some(&b'.'));
+    let dotted =
+        b.get(i) == Some(&b'.') || (b.get(i) == Some(&b'-') && b.get(i + 1) == Some(&b'.'));
     if dotted {
         if b.get(i) == Some(&b'-') {
             i += 1; // optional leading dash
@@ -519,7 +565,7 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
             i += 1;
         }
         let dots = i - dots_start; // >= 1
-        // Immediate closing dash + optional arrow: `-.->`, `.-`, `<.->`, …
+                                   // Immediate closing dash + optional arrow: `-.->`, `.-`, `<.->`, …
         if b.get(i) == Some(&b'-') {
             i += 1; // closing dash
             let (end, j) = end_arrow(i).unwrap_or((ArrowType::None, i));
@@ -537,7 +583,14 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
             let cdots = j - cd_start; // >= 1
             j += 1; // closing dash of ".-"
             let (end, j2) = end_arrow(j).unwrap_or((ArrowType::None, j));
-            return Some((j2, EdgeStyle::Dotted, start, end, (!text.is_empty()).then_some(text), cdots));
+            return Some((
+                j2,
+                EdgeStyle::Dotted,
+                start,
+                end,
+                (!text.is_empty()).then_some(text),
+                cdots,
+            ));
         }
         return None;
     }
@@ -548,7 +601,11 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
         Some(b'-') => b'-',
         _ => return None,
     };
-    let style = if line == b'=' { EdgeStyle::Thick } else { EdgeStyle::Solid };
+    let style = if line == b'=' {
+        EdgeStyle::Thick
+    } else {
+        EdgeStyle::Solid
+    };
     let open_start = i;
     while b.get(i) == Some(&line) {
         i += 1;
@@ -582,7 +639,14 @@ fn detect_link(s: &str, boundary: bool) -> Option<(usize, EdgeStyle, ArrowType, 
     // Bare open link (`---`, `====`, …). With no arrowhead, mermaid's
     // `destructEndLink` still strips one trailing char, so the shaft is one
     // shorter than the dash run: `---` spans 1 rank, `----` 2, etc.
-    Some((i, style, start, ArrowType::None, None, (i - open_start).saturating_sub(2).max(1)))
+    Some((
+        i,
+        style,
+        start,
+        ArrowType::None,
+        None,
+        (i - open_start).saturating_sub(2).max(1),
+    ))
 }
 
 /// Ensure a node parsed from `endpoint` exists in the chart, returning its
@@ -603,7 +667,15 @@ fn ensure_node(chart: &mut Flowchart, endpoint: &str, current: Option<usize>) ->
         idx
     } else {
         let label = label.unwrap_or_else(|| id.clone());
-        chart.nodes.push(Node { id, label, shape, subgraph: current, classes: Vec::new(), styles: Vec::new(), subgraph_ref: None });
+        chart.nodes.push(Node {
+            id,
+            label,
+            shape,
+            subgraph: current,
+            classes: Vec::new(),
+            styles: Vec::new(),
+            subgraph_ref: None,
+        });
         chart.nodes.len() - 1
     };
     // Inline `id:::className` class assignment.
@@ -627,7 +699,10 @@ fn split_class(endpoint: &str) -> (&str, Option<String>) {
             ']' | ')' | '}' => depth -= 1,
             ':' if depth == 0 && endpoint[i..].starts_with(":::") => {
                 let class = endpoint[i + 3..].trim();
-                return (endpoint[..i].trim(), (!class.is_empty()).then(|| class.to_string()));
+                return (
+                    endpoint[..i].trim(),
+                    (!class.is_empty()).then(|| class.to_string()),
+                );
             }
             _ => {}
         }
@@ -735,7 +810,10 @@ fn parse_endpoint(endpoint: &str) -> (String, NodeShape, Option<String>, Option<
     // mermaid v11 `id@{ shape: …, label: "…" }` node-metadata syntax.
     if let Some(at) = endpoint.find("@{") {
         let id = endpoint[..at].trim().to_string();
-        let inner = endpoint[at + 2..].trim().strip_suffix('}').unwrap_or(&endpoint[at + 2..]);
+        let inner = endpoint[at + 2..]
+            .trim()
+            .strip_suffix('}')
+            .unwrap_or(&endpoint[at + 2..]);
         let (shape, label) = parse_at_metadata(inner);
         return (id, shape, label, class);
     }
@@ -856,7 +934,9 @@ mod tests {
         let chart = parse("flowchart LR\n a[\"\nline one\nline two\n\"] --> b").unwrap();
         assert_eq!(chart.nodes.len(), 2);
         assert_eq!(chart.nodes[0].id, "a");
-        assert!(chart.nodes[0].label.contains("line one") && chart.nodes[0].label.contains("line two"));
+        assert!(
+            chart.nodes[0].label.contains("line one") && chart.nodes[0].label.contains("line two")
+        );
     }
 
     #[test]
@@ -866,7 +946,9 @@ mod tests {
             "---\ntitle: My Chart\n---\nflowchart LR\n accTitle: Acc T\n accDescr: Acc D\n A --> B",
         )
         .unwrap();
-        let crate::ir::Diagram::Flowchart(f) = d else { unreachable!() };
+        let crate::ir::Diagram::Flowchart(f) = d else {
+            unreachable!()
+        };
         assert_eq!(f.title.as_deref(), Some("My Chart"));
         assert_eq!(f.acc_title.as_deref(), Some("Acc T"));
         assert_eq!(f.acc_descr.as_deref(), Some("Acc D"));
@@ -875,10 +957,8 @@ mod tests {
 
     #[test]
     fn skips_accessibility_metadata() {
-        let chart = parse(
-            "flowchart LR\n accTitle: A title\n accDescr: A description\n A --> B",
-        )
-        .unwrap();
+        let chart =
+            parse("flowchart LR\n accTitle: A title\n accDescr: A description\n A --> B").unwrap();
         let ids: Vec<_> = chart.nodes.iter().map(|n| n.id.as_str()).collect();
         assert_eq!(ids, ["A", "B"]);
     }
@@ -902,12 +982,21 @@ mod tests {
             "flowchart TD\n a{{H}} --> b[[S]]\n b --> c[/P/]\n c --> d[/T\\]\n d --> e[\\L\\]\n e --> f[\\I/]\n f --> g[(C)]",
         )
         .unwrap();
-        let shapes: Vec<_> = chart.nodes.iter().map(|n| (n.id.as_str(), n.shape)).collect();
+        let shapes: Vec<_> = chart
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n.shape))
+            .collect();
         assert_eq!(
             shapes,
             [
-                ("a", Hexagon), ("b", Subroutine), ("c", Parallelogram),
-                ("d", Trapezoid), ("e", LeanLeft), ("f", InvTrapezoid), ("g", Cylinder),
+                ("a", Hexagon),
+                ("b", Subroutine),
+                ("c", Parallelogram),
+                ("d", Trapezoid),
+                ("e", LeanLeft),
+                ("f", InvTrapezoid),
+                ("g", Cylinder),
             ]
         );
         // Labels are extracted without the delimiters.
@@ -946,10 +1035,16 @@ mod tests {
         let chart = parse("flowchart TB\n subgraph One\n a1 --> a2\n end\n a2 --> b1").unwrap();
         assert_eq!(chart.subgraphs.len(), 1);
         assert_eq!(chart.subgraphs[0].id, "One");
-        let sg = chart.node_index("a1").map(|i| chart.nodes[i].subgraph).unwrap();
+        let sg = chart
+            .node_index("a1")
+            .map(|i| chart.nodes[i].subgraph)
+            .unwrap();
         assert_eq!(sg, Some(0));
         // b1 is defined outside the subgraph.
-        let b1 = chart.node_index("b1").map(|i| chart.nodes[i].subgraph).unwrap();
+        let b1 = chart
+            .node_index("b1")
+            .map(|i| chart.nodes[i].subgraph)
+            .unwrap();
         assert_eq!(b1, None);
     }
 
