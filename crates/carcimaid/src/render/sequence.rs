@@ -373,10 +373,20 @@ fn draw_shape(
                     circle(out, cx, ccy, r);
                     line(out, cx - r, ccy + r + 4.0, cx + r, ccy + r + 4.0);
                 }
-                // control: circle with a small arc/tick on top.
+                // control: circle with mermaid's concave arrowhead flick at the
+                // top (its `filled-head-control` marker, angled 172.5°).
                 _ => {
                     circle(out, cx, ccy, r);
-                    line(out, cx, ccy - r, cx + 8.0, ccy - r - 6.0);
+                    let _ = write!(
+                        out,
+                        concat!(
+                            r##"<path d="M 14.4 5.6 L 7.2 10.4 L 8.8 5.6 L 7.2 0.8 Z" "##,
+                            r##"transform="translate({tx},{ty}) rotate(172.5) translate(-11,-5.8)" "##,
+                            r##"fill="#666" stroke="#666" stroke-width="1.2"/>"##,
+                        ),
+                        tx = n(cx),
+                        ty = n(ccy - r),
+                    );
                 }
             }
             actor_label(out, cx, y + h - 8.0, lines, "actor actor-box");
