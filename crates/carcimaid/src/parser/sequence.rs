@@ -274,13 +274,14 @@ fn ensure_participant(id: &str, is_actor: bool, d: &mut SequenceDiagram) -> usiz
 fn parse_shape_meta(body: &str) -> Option<String> {
     let at = body.find("@{")?;
     let meta = &body[at..];
-    let key = meta.find("\"type\"").or_else(|| meta.find("type"))?;
-    // The value is the next double-quoted string after the key.
-    let rest = &meta[key..];
-    let q1 = rest[4..].find('"')? + 4 + 1; // skip past `type` then opening quote
-    let after = &rest[q1..];
-    let q2 = after.find('"')?;
-    let ty = after[..q2].to_string();
+    let key = meta.find("type")?;
+    // Value = the quoted string after the `:` that follows the `type` key.
+    let after_key = &meta[key + 4..];
+    let colon = after_key.find(':')?;
+    let rest = &after_key[colon + 1..];
+    let q1 = rest.find('"')?;
+    let q2 = rest[q1 + 1..].find('"')?;
+    let ty = rest[q1 + 1..q1 + 1 + q2].to_string();
     matches!(
         ty.as_str(),
         "boundary" | "control" | "entity" | "database" | "collections" | "queue"

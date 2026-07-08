@@ -94,6 +94,8 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
         let fy = if a.destroyed { a.stopy } else { s.bottom_y };
         if a.is_actor {
             out.push_str("<g></g>");
+        } else if let Some(shape) = &a.shape {
+            draw_shape(&mut out, shape, a.cx(), a.x, fy, a.width, a.height, &a.label_lines, &a.id, false);
         } else {
             actor_box(&mut out, a.cx(), a.x, fy, a.width, a.height, &a.label_lines, &a.id, false);
         }
@@ -124,7 +126,11 @@ pub fn to_svg(s: &LaidOutSequence) -> String {
                 i = i,
                 id = esc(&a.id),
             );
-            actor_box(&mut out, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
+            if let Some(shape) = &a.shape {
+                draw_shape(&mut out, shape, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
+            } else {
+                actor_box(&mut out, cx, a.x, a.starty, a.width, a.height, &a.label_lines, &a.id, true);
+            }
             out.push_str("</g>");
         }
         out.push_str("</g>");
@@ -268,6 +274,105 @@ fn actor_box(
         class = class,
     );
     actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
+    if !top {
+        out.push_str("</g>");
+    }
+}
+
+/// Emit a UML participant shape (`@{type}`): boundary/control/entity/database
+/// (icon + label below) or queue/collections (box-like, label inside). Geometry
+/// is a visual approximation of mermaid's shapes (which use browser `getBBox`).
+#[allow(clippy::too_many_arguments)]
+fn draw_shape(
+    out: &mut String,
+    shape: &str,
+    cx: f64,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    lines: &[String],
+    id: &str,
+    top: bool,
+) {
+    let cls = if top { "actor actor-top" } else { "actor actor-bottom" };
+    let fill = r##"fill="#eaeaea" stroke="#666""##;
+    if !top {
+        out.push_str("<g>");
+    }
+    let circle = |out: &mut String, ccx: f64, ccy: f64, r: f64| {
+        let _ = write!(
+            out,
+            r#"<circle cx="{cx}" cy="{cy}" r="{r}" {f} name="{id}" class="{cls}"/>"#,
+            cx = n(ccx), cy = n(ccy), r = n(r), f = fill, id = esc(id), cls = cls,
+        );
+    };
+    let line = |out: &mut String, x1: f64, y1: f64, x2: f64, y2: f64| {
+        let _ = write!(
+            out,
+            r##"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#666" stroke-width="1"/>"##,
+            x1 = n(x1), y1 = n(y1), x2 = n(x2), y2 = n(y2),
+        );
+    };
+    match shape {
+        // Box-like shapes carry the label inside; the icon frames the whole box.
+        "queue" => {
+            let _ = write!(
+                out,
+                r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}" {f} name="{id}" class="{cls}"/>"#,
+                x = n(x), y = n(y), w = n(w), h = n(h), r = n(h / 2.0), f = fill, id = esc(id), cls = cls,
+            );
+            actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
+        }
+        "collections" => {
+            // A shadow box offset behind, then the front box; label inside.
+            let _ = write!(
+                out,
+                r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" {f} name="{id}" class="{cls}"/>"#,
+                x = n(x + 6.0), y = n(y - 6.0), w = n(w), h = n(h), f = fill, id = esc(id), cls = cls,
+            );
+            let _ = write!(
+                out,
+                r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" {f} name="{id}" class="{cls}"/>"#,
+                x = n(x), y = n(y), w = n(w), h = n(h), f = fill, id = esc(id), cls = cls,
+            );
+            actor_label(out, cx, y + h / 2.0, lines, "actor actor-box");
+        }
+        // Icon shapes: small glyph in the upper area, label centred below it.
+        "database" => {
+            let rw = 18.0;
+            let ry = 5.0;
+            let bh = 26.0;
+            let (l, ty) = (cx - rw, y + 6.0);
+            let d = format!(
+                "M {l},{t} a {rw},{ry} 0 0 0 {d2},0 a {rw},{ry} 0 0 0 {nd2},0 l 0,{bh} a {rw},{ry} 0 0 0 {d2},0 l 0,{nbh}",
+                l = n(l), t = n(ty + ry), rw = n(rw), ry = n(ry),
+                d2 = n(rw * 2.0), nd2 = n(-rw * 2.0), bh = n(bh), nbh = n(-bh),
+            );
+            let _ = write!(out, r#"<path d="{d}" {f} name="{id}" class="{cls}"/>"#, d = d, f = fill, id = esc(id), cls = cls);
+            actor_label(out, cx, y + h - 8.0, lines, "actor actor-box");
+        }
+        "boundary" | "control" | "entity" | _ => {
+            let (ccy, r) = (y + 18.0, 16.0);
+            match shape {
+                "boundary" => {
+                    line(out, cx - r - 12.0, y + 4.0, cx - r - 12.0, y + 32.0);
+                    line(out, cx - r - 12.0, ccy, cx - r, ccy);
+                    circle(out, cx, ccy, r);
+                }
+                "entity" => {
+                    circle(out, cx, ccy, r);
+                    line(out, cx - r, ccy + r + 4.0, cx + r, ccy + r + 4.0);
+                }
+                // control: circle with a small arc/tick on top.
+                _ => {
+                    circle(out, cx, ccy, r);
+                    line(out, cx, ccy - r, cx + 8.0, ccy - r - 6.0);
+                }
+            }
+            actor_label(out, cx, y + h - 8.0, lines, "actor actor-box");
+        }
+    }
     if !top {
         out.push_str("</g>");
     }
