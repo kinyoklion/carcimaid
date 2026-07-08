@@ -18,6 +18,10 @@ struct Args {
     filter: Option<String>,
     tolerance: f64,
     use_oracle: bool,
+    /// Reuse an existing `oracle.svg` in the artifacts dir instead of
+    /// re-rendering it (the oracle is deterministic per input + mermaid
+    /// version). Lets CI cache the slow oracle passes.
+    reuse_oracle: bool,
     verbose: bool,
 }
 
@@ -29,6 +33,7 @@ impl Args {
             filter: None,
             tolerance: 1.0,
             use_oracle: true,
+            reuse_oracle: false,
             verbose: false,
         };
         let mut it = std::env::args().skip(1);
@@ -44,6 +49,7 @@ impl Args {
                         .expect("--tolerance N")
                 }
                 "--no-oracle" => a.use_oracle = false,
+                "--reuse-oracle" => a.reuse_oracle = true,
                 "-v" | "--verbose" => a.verbose = true,
                 other => {
                     eprintln!("unknown argument: {other}");
@@ -120,7 +126,20 @@ fn main() -> ExitCode {
         };
         let _ = std::fs::write(out_dir.join("carcimaid.svg"), &ours);
 
-        if !oracle_ready {
+        // Reuse a cached oracle.svg if present (deterministic output); this lets
+        // CI restore the slow oracle passes from cache and skip docker entirely.
+        let oracle_svg = out_dir.join("oracle.svg");
+        let cached = if args.reuse_oracle {
+            std::fs::read_to_string(&oracle_svg)
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        } else {
+            None
+        };
+
+        let reference = if let Some(svg) = cached {
+            svg
+        } else if !oracle_ready {
             println!(
                 "{:<40} {:>10} {:>8} {:>8}",
                 trunc(&case.id),
@@ -129,26 +148,28 @@ fn main() -> ExitCode {
                 "ours"
             );
             continue;
-        }
-
-        let reference = match oracle.render(&case.source, &out_dir.join("oracle")) {
-            Ok(svg) => svg,
-            Err(e) => {
-                println!(
-                    "{:<40} {:>10} {:>8} {:>8}",
-                    trunc(&case.id),
-                    "-",
-                    "-",
-                    "ORACLE-ERR"
-                );
-                if args.verbose {
-                    println!("    {e}");
+        } else {
+            match oracle.render(&case.source, &out_dir.join("oracle")) {
+                Ok(svg) => {
+                    let _ = std::fs::write(&oracle_svg, &svg);
+                    svg
                 }
-                errored += 1;
-                continue;
+                Err(e) => {
+                    println!(
+                        "{:<40} {:>10} {:>8} {:>8}",
+                        trunc(&case.id),
+                        "-",
+                        "-",
+                        "ORACLE-ERR"
+                    );
+                    if args.verbose {
+                        println!("    {e}");
+                    }
+                    errored += 1;
+                    continue;
+                }
             }
         };
-        let _ = std::fs::write(out_dir.join("oracle.svg"), &reference);
 
         let report = match (svgdiff::parse(&reference), svgdiff::parse(&ours)) {
             (Ok(r), Ok(c)) => svgdiff::compare(&r, &c, &opts),
