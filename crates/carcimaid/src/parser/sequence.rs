@@ -213,9 +213,11 @@ fn declare_participant(
     box_idx: Option<usize>,
 ) -> Option<usize> {
     let body = body.trim();
-    // A trailing `@{ ... }` metadata block carries the participant shape (e.g.
-    // `@{ "type": "boundary" }`); capture the `type`, then strip the block.
+    // A trailing `@{ ... }` metadata block carries the participant shape and/or a
+    // display alias (e.g. `@{ "type": "boundary", "alias": "Auth" }`); capture
+    // them, then strip the block.
     let shape = parse_shape_meta(body);
+    let meta_alias = parse_meta_value(body, "alias");
     let body = body.split('@').next().unwrap_or(body).trim();
     let (id, label) = match split_as(body) {
         Some((id, alias)) => (id.trim().to_string(), alias.trim().to_string()),
@@ -224,6 +226,12 @@ fn declare_participant(
     if id.is_empty() {
         return None;
     }
+    // An `@{ "alias": … }` sets the display label (unless an `as` alias already
+    // did, which `split_as` handled above by making label != id).
+    let label = match meta_alias {
+        Some(a) if label == id => a,
+        _ => label,
+    };
     // A `wrap:` / `nowrap:` prefix on the label is a directive.
     let mut wrap = false;
     let mut label = label;
@@ -279,24 +287,29 @@ fn ensure_participant(id: &str, is_actor: bool, d: &mut SequenceDiagram) -> usiz
     d.participants.len() - 1
 }
 
-/// Extract the `type` value from a `@{ ... "type": "boundary" ... }` metadata
-/// block, if present. Only the shape types we render are returned.
-fn parse_shape_meta(body: &str) -> Option<String> {
+/// Extract a string value for `key` from a `@{ … "key": "value" … }` metadata
+/// block, if present.
+fn parse_meta_value(body: &str, key: &str) -> Option<String> {
     let at = body.find("@{")?;
     let meta = &body[at..];
-    let key = meta.find("type")?;
-    // Value = the quoted string after the `:` that follows the `type` key.
-    let after_key = &meta[key + 4..];
+    let ki = meta.find(key)?;
+    // Value = the quoted string after the `:` that follows the key.
+    let after_key = &meta[ki + key.len()..];
     let colon = after_key.find(':')?;
     let rest = &after_key[colon + 1..];
     let q1 = rest.find('"')?;
     let q2 = rest[q1 + 1..].find('"')?;
-    let ty = rest[q1 + 1..q1 + 1 + q2].to_string();
-    matches!(
-        ty.as_str(),
-        "boundary" | "control" | "entity" | "database" | "collections" | "queue"
-    )
-    .then_some(ty)
+    Some(rest[q1 + 1..q1 + 1 + q2].to_string())
+}
+
+/// The `type` value from a `@{ … }` block, restricted to shapes we render.
+fn parse_shape_meta(body: &str) -> Option<String> {
+    parse_meta_value(body, "type").filter(|ty| {
+        matches!(
+            ty.as_str(),
+            "boundary" | "control" | "entity" | "database" | "collections" | "queue"
+        )
+    })
 }
 
 /// Parse a `box` header: an optional leading colour (`rgb(...)`, `#hex`, or a
