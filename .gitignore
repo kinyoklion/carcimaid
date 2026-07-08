@@ -4,3 +4,6 @@
 
 # Compliance harness artifacts (generated SVGs / diffs / reports)
 /artifacts
+
+# Claude Code agent worktrees
+.claude/worktrees/
