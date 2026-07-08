@@ -458,6 +458,9 @@ pub struct Participant {
     /// `wrap:` directive on the label — wrap it to the actor width (growing the
     /// box height) rather than widening the box to one line.
     pub wrap: bool,
+    /// UML shape from `@{ "type": "boundary" }` metadata (boundary/control/
+    /// entity/database/collections/queue). `None` = plain box or `actor`.
+    pub shape: Option<String>,
 }
 
 /// One entry in the sequence's ordered event stream.

@@ -71,6 +71,8 @@ pub struct PlacedActor {
     pub height: f64,
     /// Label display lines (wrapped / `<br>`-split).
     pub label_lines: Vec<String>,
+    /// UML shape (`@{type}`): boundary/control/entity/database/collections/queue.
+    pub shape: Option<String>,
     /// Top-box y. `top_y` normally; for a `create`d actor, the y of the message
     /// that introduces it (box centred on that line).
     pub starty: f64,
@@ -631,6 +633,7 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
             width: widths[i],
             height: heights[i],
             label_lines: actor_lines[i].clone(),
+            shape: p.shape.clone(),
             starty: 0.0, // set to top_y below
             stopy: 0.0,  // set to bottom_y after the walk
             created: false,

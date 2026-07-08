@@ -210,7 +210,9 @@ fn declare_participant(
     box_idx: Option<usize>,
 ) -> Option<usize> {
     let body = body.trim();
-    // Strip a trailing `@{ ... }` metadata block (participant shapes).
+    // A trailing `@{ ... }` metadata block carries the participant shape (e.g.
+    // `@{ "type": "boundary" }`); capture the `type`, then strip the block.
+    let shape = parse_shape_meta(body);
     let body = body.split('@').next().unwrap_or(body).trim();
     let (id, label) = match split_as(body) {
         Some((id, alias)) => (id.trim().to_string(), alias.trim().to_string()),
@@ -234,13 +236,16 @@ fn declare_participant(
             d.participants[i].label = label;
             d.participants[i].is_actor = is_actor;
             d.participants[i].wrap = wrap;
+            if shape.is_some() {
+                d.participants[i].shape = shape;
+            }
             if box_idx.is_some() {
                 d.participants[i].box_idx = box_idx;
             }
             Some(i)
         }
         None => {
-            d.participants.push(Participant { id, label, is_actor, box_idx, wrap });
+            d.participants.push(Participant { id, label, is_actor, box_idx, wrap, shape });
             Some(d.participants.len() - 1)
         }
     }
@@ -259,8 +264,28 @@ fn ensure_participant(id: &str, is_actor: bool, d: &mut SequenceDiagram) -> usiz
         is_actor,
         box_idx: None,
         wrap: false,
+        shape: None,
     });
     d.participants.len() - 1
+}
+
+/// Extract the `type` value from a `@{ ... "type": "boundary" ... }` metadata
+/// block, if present. Only the shape types we render are returned.
+fn parse_shape_meta(body: &str) -> Option<String> {
+    let at = body.find("@{")?;
+    let meta = &body[at..];
+    let key = meta.find("\"type\"").or_else(|| meta.find("type"))?;
+    // The value is the next double-quoted string after the key.
+    let rest = &meta[key..];
+    let q1 = rest[4..].find('"')? + 4 + 1; // skip past `type` then opening quote
+    let after = &rest[q1..];
+    let q2 = after.find('"')?;
+    let ty = after[..q2].to_string();
+    matches!(
+        ty.as_str(),
+        "boundary" | "control" | "entity" | "database" | "collections" | "queue"
+    )
+    .then_some(ty)
 }
 
 /// Parse a `box` header: an optional leading colour (`rgb(...)`, `#hex`, or a
