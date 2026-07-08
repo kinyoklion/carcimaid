@@ -545,7 +545,7 @@ fn actor_label(out: &mut String, cx: f64, cy: f64, lines: &[String], class: &str
             cy = n(cy),
             class = class,
             dy = n(dy),
-            t = esc(line),
+            t = esc(line_or_zwsp(line)),
         );
     }
 }
@@ -701,7 +701,7 @@ fn note_box(out: &mut String, note: &crate::layout::sequence::PlacedNote) {
             ),
             cx = n(cx),
             ty = n(note.y + 5.0 + i as f64 * SEQ_LINE_H),
-            t = esc(line),
+            t = esc(line_or_zwsp(line)),
         );
     }
     out.push_str("</g>");
@@ -723,7 +723,7 @@ fn message(out: &mut String, m: &PlacedMessage, actors: &[crate::layout::sequenc
             ),
             x = n(text_x),
             y = n(m.text_y + i as f64 * SEQ_LINE_H),
-            t = esc(line),
+            t = esc(line_or_zwsp(line)),
         );
     }
 
@@ -872,6 +872,16 @@ const SEQ_LINE_H: f64 = 19.0;
 
 /// Split a label on `<br>`/`<br/>`/newlines into display lines, then decode
 /// mermaid's `#…;` entity escapes per line.
+/// mermaid renders an empty label line (from a trailing or consecutive `<br/>`)
+/// as a zero-width space, so the `<text>`/`<tspan>` keeps its line height.
+fn line_or_zwsp(line: &str) -> &str {
+    if line.is_empty() {
+        "\u{200b}"
+    } else {
+        line
+    }
+}
+
 fn split_lines(text: &str) -> Vec<String> {
     text.replace("<br/>", "\n")
         .replace("<br />", "\n")
