@@ -29,6 +29,7 @@ mod sequence;
 
 use crate::ir::{ArrowType, NodeShape, Palette};
 use crate::layout::{LaidOut, LaidOutFlowchart, PlacedCluster, PlacedEdge, PlacedNode};
+use crate::Background;
 use std::fmt::Write;
 
 /// Diagram id prefix. mermaid generates a per-render id (`my-svg`, etc.); the
@@ -50,14 +51,27 @@ const TITLE_FONT_SIZE: f64 = 18.0;
 const TITLE_MARGIN: f64 = 8.0;
 
 /// Render a laid-out diagram to an SVG document string.
-pub fn to_svg(diagram: &LaidOut) -> String {
+pub fn to_svg(diagram: &LaidOut, background: &Background) -> String {
     match diagram {
-        LaidOut::Flowchart(f) => flowchart_svg(f),
-        LaidOut::Sequence(s) => sequence::to_svg(s),
+        LaidOut::Flowchart(f) => flowchart_svg(f, background),
+        LaidOut::Sequence(s) => sequence::to_svg(s, background),
     }
 }
 
-fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
+/// The SVG root's `style` attribute for a given background, including a single
+/// leading space so it can be concatenated directly after the preceding
+/// attribute. `Background::Default` reproduces mermaid's `background-color:
+/// white;` exactly (keeping default output byte-identical); `Transparent`
+/// omits the attribute entirely (leaving `rgba(0,0,0,0)`).
+pub(crate) fn background_attr(background: &Background) -> String {
+    match background {
+        Background::Default => r#" style="background-color: white;""#.to_string(),
+        Background::Transparent => String::new(),
+        Background::Color(c) => format!(r#" style="background-color: {};""#, escape(c)),
+    }
+}
+
+fn flowchart_svg(chart: &LaidOutFlowchart, background: &Background) -> String {
     let mut s = String::new();
     // Content bounding box (origin + size) computed by layout, including edge
     // overflow beyond the node band.
@@ -97,7 +111,7 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
             r#"<svg id="{id}" width="{vw}" xmlns="http://www.w3.org/2000/svg" "#,
             r#"xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" "#,
             r#"height="{vh}" viewBox="{vx} {vy} {vw} {vh}" role="graphics-document document" "#,
-            r#"aria-roledescription="flowchart-v2"{aria} style="background-color: white;">"#,
+            r#"aria-roledescription="flowchart-v2"{aria}{bg}>"#,
         ),
         id = ID,
         vw = vw,
@@ -105,6 +119,7 @@ fn flowchart_svg(chart: &LaidOutFlowchart) -> String {
         vh = vh,
         vy = vy,
         aria = aria,
+        bg = background_attr(background),
     );
 
     // <title>/<desc> from accTitle/accDescr, before <style> (mermaid's order).
@@ -3005,7 +3020,7 @@ fn escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::render_to_svg;
+    use crate::{render_to_svg, render_to_svg_with, Background};
 
     #[test]
     fn renders_mermaid_aligned_structure() {
@@ -3020,5 +3035,47 @@ mod tests {
         assert!(svg.contains("text-inner-tspan"));
         assert!(!svg.contains("foreignObject"));
         assert!(svg.ends_with("</svg>"));
+    }
+
+    /// The root tag up to and including the first `>`.
+    fn root_tag(svg: &str) -> &str {
+        &svg[..svg.find('>').unwrap() + 1]
+    }
+
+    #[test]
+    fn background_default_is_byte_identical() {
+        // The compliance corpus is diffed against the default render, so
+        // `Background::Default` must reproduce `render_to_svg` exactly.
+        for src in [
+            "flowchart TD\n A[Start] --> B[End]",
+            "sequenceDiagram\n A->>B: hi",
+        ] {
+            let default = render_to_svg(src).unwrap();
+            let explicit = render_to_svg_with(src, Background::Default).unwrap();
+            assert_eq!(default, explicit);
+            assert!(default.contains("background-color: white;"));
+        }
+    }
+
+    #[test]
+    fn background_variants_touch_only_the_root() {
+        for src in [
+            "flowchart TD\n A[Start] --> B[End]",
+            "sequenceDiagram\n A->>B: hi",
+        ] {
+            let default = render_to_svg_with(src, Background::Default).unwrap();
+            let transparent = render_to_svg_with(src, Background::Transparent).unwrap();
+            let colored = render_to_svg_with(src, Background::Color("#1e1e1e".into())).unwrap();
+
+            // Transparent drops the root background-color entirely.
+            assert!(!root_tag(&transparent).contains("background-color"));
+            // Color substitutes the caller's value.
+            assert!(root_tag(&colored).contains("background-color: #1e1e1e;"));
+
+            // Everything after the root `<svg …>` tag is untouched.
+            let body = |s: &str| s[s.find('>').unwrap()..].to_string();
+            assert_eq!(body(&default), body(&transparent));
+            assert_eq!(body(&default), body(&colored));
+        }
     }
 }

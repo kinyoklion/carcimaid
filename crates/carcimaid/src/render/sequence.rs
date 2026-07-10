@@ -13,16 +13,17 @@ use crate::layout::sequence::{LaidOutSequence, PlacedMessage};
 use std::fmt::Write;
 
 /// Render a laid-out sequence diagram to an SVG document string.
-pub fn to_svg(s: &LaidOutSequence) -> String {
+pub fn to_svg(s: &LaidOutSequence, background: &crate::Background) -> String {
     let mut out = String::new();
     let _ = write!(
         out,
         concat!(
-            r#"<svg aria-roledescription="sequence" role="graphics-document document" "#,
-            r#"style="background-color: white;" xmlns="http://www.w3.org/2000/svg" "#,
+            r#"<svg aria-roledescription="sequence" role="graphics-document document""#,
+            r#"{bg} xmlns="http://www.w3.org/2000/svg" "#,
             r#"xmlns:xlink="http://www.w3.org/1999/xlink" width="{w}" height="{h}" "#,
             r#"viewBox="{vx} {vy} {vw} {vh}" id="{id}">"#,
         ),
+        bg = super::background_attr(background),
         w = n(s.width),
         h = n(s.height),
         vx = n(s.vb_min_x),
