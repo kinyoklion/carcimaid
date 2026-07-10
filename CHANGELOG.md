@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3](https://github.com/kinyoklion/carcimaid/compare/carcimaid-v0.1.2...carcimaid-v0.1.3) (2026-07-10)
+
+### Features
+
+* **api:** let callers override the theme via RenderOptions
+
 ## [0.1.2](https://github.com/kinyoklion/carcimaid/compare/carcimaid-v0.1.1...carcimaid-v0.1.2) (2026-07-10)
 
 ### Features
