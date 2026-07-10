@@ -12,6 +12,22 @@ pub enum Diagram {
     Sequence(SequenceDiagram),
 }
 
+impl Diagram {
+    /// Apply a fallback colour [`Theme`] chosen by the caller. This is a
+    /// *default*, not an override: callers are expected to invoke it only when
+    /// the source did not select a theme itself (see
+    /// [`crate::render_to_svg_with`]).
+    ///
+    /// Honoured for flowcharts; sequence diagrams have no theme model yet and
+    /// are left unchanged.
+    pub fn set_default_theme(&mut self, theme: Theme) {
+        match self {
+            Diagram::Flowchart(f) => f.theme = theme,
+            Diagram::Sequence(_) => {}
+        }
+    }
+}
+
 /// Flow direction, mirroring mermaid's `TD`/`TB`/`BT`/`LR`/`RL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {

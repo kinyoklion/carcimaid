@@ -3020,7 +3020,18 @@ fn escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{render_to_svg, render_to_svg_with, Background};
+    use crate::{render_to_svg, render_to_svg_with, Background, RenderOptions, Theme};
+
+    fn with_bg(src: &str, background: Background) -> String {
+        render_to_svg_with(
+            src,
+            &RenderOptions {
+                background,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
 
     #[test]
     fn renders_mermaid_aligned_structure() {
@@ -3043,15 +3054,15 @@ mod tests {
     }
 
     #[test]
-    fn background_default_is_byte_identical() {
+    fn default_options_are_byte_identical() {
         // The compliance corpus is diffed against the default render, so
-        // `Background::Default` must reproduce `render_to_svg` exactly.
+        // `RenderOptions::default()` must reproduce `render_to_svg` exactly.
         for src in [
             "flowchart TD\n A[Start] --> B[End]",
             "sequenceDiagram\n A->>B: hi",
         ] {
             let default = render_to_svg(src).unwrap();
-            let explicit = render_to_svg_with(src, Background::Default).unwrap();
+            let explicit = render_to_svg_with(src, &RenderOptions::default()).unwrap();
             assert_eq!(default, explicit);
             assert!(default.contains("background-color: white;"));
         }
@@ -3063,9 +3074,9 @@ mod tests {
             "flowchart TD\n A[Start] --> B[End]",
             "sequenceDiagram\n A->>B: hi",
         ] {
-            let default = render_to_svg_with(src, Background::Default).unwrap();
-            let transparent = render_to_svg_with(src, Background::Transparent).unwrap();
-            let colored = render_to_svg_with(src, Background::Color("#1e1e1e".into())).unwrap();
+            let default = with_bg(src, Background::Default);
+            let transparent = with_bg(src, Background::Transparent);
+            let colored = with_bg(src, Background::Color("#1e1e1e".into()));
 
             // Transparent drops the root background-color entirely.
             assert!(!root_tag(&transparent).contains("background-color"));
@@ -3077,5 +3088,44 @@ mod tests {
             assert_eq!(body(&default), body(&transparent));
             assert_eq!(body(&default), body(&colored));
         }
+    }
+
+    #[test]
+    fn theme_option_repaints_flowchart_default() {
+        let src = "flowchart TD\n A[Start] --> B[End]";
+        // The default (light) theme paints the purple node border #9370DB.
+        let light = render_to_svg(src).unwrap();
+        assert!(light.contains("#9370DB"));
+
+        let dark = render_to_svg_with(
+            src,
+            &RenderOptions {
+                theme: Some(Theme::Dark),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Dark theme repaints from its palette (node bkg #1f2020) and drops the
+        // default-theme purple.
+        assert!(dark.contains("#1f2020"));
+        assert!(!dark.contains("#9370DB"));
+    }
+
+    #[test]
+    fn frontmatter_theme_wins_over_option() {
+        // The consumer default is Dark, but the source explicitly asks for
+        // forest — the explicit frontmatter choice must win.
+        let src = "---\nconfig:\n  theme: forest\n---\nflowchart TD\n A[Start] --> B[End]";
+        let svg = render_to_svg_with(
+            src,
+            &RenderOptions {
+                theme: Some(Theme::Dark),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Forest node border #13540c present; dark node bkg #1f2020 absent.
+        assert!(svg.contains("#13540c"));
+        assert!(!svg.contains("#1f2020"));
     }
 }

@@ -103,7 +103,7 @@ fn frontmatter_look(source: &str) -> Option<Look> {
 /// `flowchart:` inside `config:`; the `flowchart:` sub-map has no `theme:` key,
 /// so a lightweight scan for the first `theme:` line in the frontmatter block
 /// suffices. Returns `None` for unknown/absent themes (renderer uses default).
-fn frontmatter_theme(source: &str) -> Option<Theme> {
+pub(crate) fn frontmatter_theme(source: &str) -> Option<Theme> {
     let mut lines = source.lines().skip_while(|l| l.trim().is_empty());
     if lines.next()?.trim() != "---" {
         return None;
