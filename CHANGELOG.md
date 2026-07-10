@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.4](https://github.com/kinyoklion/carcimaid/compare/carcimaid-v0.1.3...carcimaid-v0.1.4) (2026-07-10)
+
+### Features
+
+* **sequence:** honor the theme override in sequence diagrams
+
 ## [0.1.3](https://github.com/kinyoklion/carcimaid/compare/carcimaid-v0.1.2...carcimaid-v0.1.3) (2026-07-10)
 
 ### Features
