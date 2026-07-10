@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.2](https://github.com/kinyoklion/carcimaid/compare/carcimaid-v0.1.1...carcimaid-v0.1.2) (2026-07-10)
+
+### Features
+
+* **api:** add render_to_svg_with(source, Background) knob
+* **sequence:** honor @{ "alias": … } participant metadata
+
+### Bug Fixes
+
+* **compliance:** exit 0 when the harness completes
+
 ## 0.1.1 (2026-07-08)
 
 ### Bug Fixes
