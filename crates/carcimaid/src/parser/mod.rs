@@ -40,6 +40,9 @@ pub fn parse(source: &str) -> Result<Diagram> {
             if s.title.is_none() {
                 s.title = title; // visible title from frontmatter
             }
+            if let Some(th) = theme {
+                s.theme = th;
+            }
             Ok(Diagram::Sequence(s))
         }
         other => Err(Error::Unsupported(format!("diagram type `{other}`"))),

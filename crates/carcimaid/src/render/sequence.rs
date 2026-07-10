@@ -180,7 +180,7 @@ pub fn to_svg(s: &LaidOutSequence, background: &crate::Background) -> String {
     }
 
     // 3. <style> (content is not structurally compared; kept compact but real).
-    out.push_str(&style_block());
+    out.push_str(&style_block(s.theme));
     // 4. Empty <g> skeleton mermaid leaves behind.
     out.push_str("<g></g>");
     // 5. Actor icon symbols + 6. arrow markers (verbatim from the oracle).
@@ -859,13 +859,16 @@ fn end_marker_id(arrow: SeqArrow) -> Option<&'static str> {
     }
 }
 
-/// The sequence `<style>` block — mermaid's default-theme CSS verbatim. These
-/// stylesheet rules override the elements' presentation attributes (lifeline
-/// stroke, loop-line dash/colour, activation fill, all-`line` width), so
-/// emitting them is what makes the render match the oracle visually. Structural
-/// comparison ignores `<style>` text.
-fn style_block() -> String {
-    format!("<style>{}</style>", seq_defs::SEQ_STYLE)
+/// The sequence `<style>` block, painted for `theme`. These stylesheet rules
+/// override the elements' presentation attributes (lifeline stroke, loop-line
+/// dash/colour, activation fill, all-`line` width), so emitting them is what
+/// makes the render match the oracle visually and what carries the theme.
+/// Structural comparison ignores `<style>` text.
+fn style_block(theme: crate::ir::Theme) -> String {
+    format!(
+        "<style>{}</style>",
+        seq_defs::seq_style(&theme.seq_palette())
+    )
 }
 
 /// Per-line height for stacked multi-line labels (mermaid's rounded bbox at 16px).

@@ -65,7 +65,7 @@ pub struct RenderOptions {
     /// still wins (matching mermaid's precedence of frontmatter over the global
     /// `initialize()` theme).
     ///
-    /// Currently honoured for flowcharts; sequence diagrams are not yet themed.
+    /// Honoured for flowcharts and sequence diagrams.
     pub theme: Option<Theme>,
 }
 

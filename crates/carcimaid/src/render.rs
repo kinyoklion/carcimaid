@@ -3112,6 +3112,30 @@ mod tests {
     }
 
     #[test]
+    fn theme_option_repaints_sequence_style_only() {
+        let src = "sequenceDiagram\n A->>B: hi";
+        let default = render_to_svg(src).unwrap();
+        let dark = render_to_svg_with(
+            src,
+            &RenderOptions {
+                theme: Some(Theme::Dark),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // The dark <style> carries the theme…
+        assert!(dark.contains(".actor{stroke:#ccc;fill:#1f2020;stroke-width:1;}"));
+        // …but the structural body (everything outside <style>) is unchanged,
+        // so the compliance corpus is preserved.
+        let strip = |s: &str| {
+            let a = s.find("<style>").unwrap();
+            let b = s.find("</style>").unwrap() + "</style>".len();
+            format!("{}{}", &s[..a], &s[b..])
+        };
+        assert_eq!(strip(&default), strip(&dark));
+    }
+
+    #[test]
     fn frontmatter_theme_wins_over_option() {
         // The consumer default is Dark, but the source explicitly asks for
         // forest — the explicit frontmatter choice must win.

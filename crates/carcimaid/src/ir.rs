@@ -18,12 +18,11 @@ impl Diagram {
     /// the source did not select a theme itself (see
     /// [`crate::render_to_svg_with`]).
     ///
-    /// Honoured for flowcharts; sequence diagrams have no theme model yet and
-    /// are left unchanged.
+    /// Honoured for flowcharts and sequence diagrams.
     pub fn set_default_theme(&mut self, theme: Theme) {
         match self {
             Diagram::Flowchart(f) => f.theme = theme,
-            Diagram::Sequence(_) => {}
+            Diagram::Sequence(s) => s.theme = theme,
         }
     }
 }
@@ -187,6 +186,122 @@ impl Theme {
             },
         }
     }
+
+    /// The [`SeqPalette`] for this theme (sequence-diagram colours probed from
+    /// the mermaid CLI). Distinct from [`Theme::palette`] because mermaid's
+    /// sequence renderer draws from a different set of theme variables.
+    pub fn seq_palette(self) -> SeqPalette {
+        match self {
+            // Default = the values the sequence `<style>` hardcoded before theme
+            // support, so default-theme output stays byte-identical.
+            Theme::Default => SeqPalette {
+                text_color: "#333",
+                actor_border: "#9370DB",
+                actor_bkg: "#ECECFF",
+                content_text: "black",
+                signal_color: "#333",
+                label_border: "#9370DB",
+                note_border: "#aaaa33",
+                note_bkg: "#fff5ad",
+                note_text: "black",
+                activation_bkg: "#f4f4f4",
+                activation_border: "#666",
+                seq_num_fill: "white",
+            },
+            Theme::Base => SeqPalette {
+                text_color: "#333",
+                actor_border: "hsl(40.5882352941, 60%, 83.3333333333%)",
+                actor_bkg: "#fff4dd",
+                content_text: "#333",
+                signal_color: "#333",
+                label_border: "hsl(40.5882352941, 60%, 83.3333333333%)",
+                note_border: "hsl(52.6829268293, 60%, 73.9215686275%)",
+                note_bkg: "#fff5ad",
+                note_text: "#333",
+                activation_bkg: "hsl(-79.4117647059, 100%, 93.3333333333%)",
+                activation_border: "hsl(-79.4117647059, 100%, 83.3333333333%)",
+                seq_num_fill: "#f4f4f4",
+            },
+            Theme::Forest => SeqPalette {
+                text_color: "#000000",
+                actor_border: "hsl(78.1578947368, 58.4615384615%, 54.5098039216%)",
+                actor_bkg: "#cde498",
+                content_text: "black",
+                signal_color: "#333",
+                label_border: "#326932",
+                note_border: "#6eaa49",
+                note_bkg: "#fff5ad",
+                note_text: "black",
+                activation_bkg: "#f4f4f4",
+                activation_border: "#666",
+                seq_num_fill: "white",
+            },
+            Theme::Dark => SeqPalette {
+                text_color: "#ccc",
+                actor_border: "#ccc",
+                actor_bkg: "#1f2020",
+                content_text: "lightgrey",
+                signal_color: "lightgrey",
+                label_border: "#ccc",
+                note_border: "hsl(180, 0%, 18.3529411765%)",
+                note_bkg: "hsl(180, 1.5873015873%, 28.3529411765%)",
+                note_text: "rgb(183.8476190475, 181.5523809523, 181.5523809523)",
+                activation_bkg: "hsl(180, 1.5873015873%, 28.3529411765%)",
+                activation_border: "#ccc",
+                seq_num_fill: "black",
+            },
+            Theme::Neutral => SeqPalette {
+                text_color: "#000000",
+                actor_border: "hsl(0, 0%, 83%)",
+                actor_bkg: "#eee",
+                content_text: "#333",
+                signal_color: "#333",
+                label_border: "hsl(0, 0%, 83%)",
+                note_border: "#999",
+                note_bkg: "#666",
+                note_text: "#fff",
+                activation_bkg: "#f4f4f4",
+                activation_border: "#666",
+                seq_num_fill: "white",
+            },
+        }
+    }
+}
+
+/// The concrete colours a theme paints into a **sequence** diagram's `<style>`
+/// block. mermaid's sequence renderer emits fixed presentation attributes on the
+/// shapes (e.g. `fill="#eaeaea"` on actor boxes) that its themed stylesheet then
+/// overrides — the values here are those stylesheet colours, probed per theme
+/// from the mermaid CLI. Because carcimaid mirrors those same presentation
+/// attributes (and the structural comparator ignores `<style>` text), changing
+/// this palette repaints the diagram visually without affecting compliance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeqPalette {
+    /// Root text `fill` (`#my-svg{…;fill:…}`).
+    pub text_color: &'static str,
+    /// Actor box / lifeline stroke (`actorBorder`, `actorLineColor`).
+    pub actor_border: &'static str,
+    /// Actor box / label box / actor-glyph fill (`actorBkg`).
+    pub actor_bkg: &'static str,
+    /// Actor, label, loop and section text `fill`.
+    pub content_text: &'static str,
+    /// Message lines, arrowheads, crosshead, message text and sequence-number
+    /// text (`signalColor`/`signalTextColor`).
+    pub signal_color: &'static str,
+    /// Label-box border and loop-line stroke/fill (`labelBoxBorderColor`).
+    pub label_border: &'static str,
+    /// Note border (`noteBorderColor`).
+    pub note_border: &'static str,
+    /// Note fill (`noteBkgColor`).
+    pub note_bkg: &'static str,
+    /// Note text `fill` (`noteTextColor`).
+    pub note_text: &'static str,
+    /// Activation-bar fill (`activationBkgColor`).
+    pub activation_bkg: &'static str,
+    /// Activation-bar stroke (`activationBorderColor`).
+    pub activation_border: &'static str,
+    /// Sequence-number circle fill (`sequenceNumberColor`).
+    pub seq_num_fill: &'static str,
 }
 
 /// A flowchart: a directed graph of [`Node`]s connected by [`Edge`]s, with
@@ -446,6 +561,10 @@ pub struct SequenceDiagram {
     /// Participant `box` groupings (a labelled/coloured rect around a run of
     /// participants).
     pub boxes: Vec<SeqBox>,
+    /// Colour theme (`config.theme` frontmatter, or the caller's default via
+    /// [`crate::render_to_svg_with`]). Selects the [`SeqPalette`]; defaults to
+    /// [`Theme::Default`].
+    pub theme: Theme,
 }
 
 /// A `box … end` participant grouping.

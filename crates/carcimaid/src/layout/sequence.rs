@@ -56,6 +56,8 @@ pub struct LaidOutSequence {
     pub bottom_y: f64,
     pub actor_height: f64,
     pub title: Option<String>,
+    /// Colour theme, carried through to the rendered `<style>` block.
+    pub theme: crate::ir::Theme,
 }
 
 /// A participant with its lifeline x and box width.
@@ -977,5 +979,6 @@ pub fn layout(d: &SequenceDiagram) -> LaidOutSequence {
         bottom_y,
         actor_height: max_actor_h,
         title: d.title.clone(),
+        theme: d.theme,
     }
 }

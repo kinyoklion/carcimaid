@@ -22,8 +22,205 @@ pub const MARKER_DEFS: &str = concat!(
     r##"<defs><marker id="my-svg-stickBottomArrowHead" refX="7.5" refY="0" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M 0 7 L 7 0" stroke="black" stroke-width="1.5" fill="none"/></marker></defs>"##,
 );
 
+use crate::ir::SeqPalette;
+
+/// Build the sequence-diagram `<style>` CSS for a given [`SeqPalette`].
+///
+/// Starts from [`SEQ_STYLE`] (mermaid's default-theme stylesheet, verbatim from
+/// the oracle) and substitutes each themed colour by its role. Every
+/// substitution is a targeted, unambiguous fragment, so the default palette
+/// reproduces `SEQ_STYLE` byte-for-byte (see the `seq_style_*` tests).
+///
+/// Only colours that the stylesheet actually paints onto rendered sequence
+/// elements are themed; the trailing `[data-look="neo"]` rules (flowchart
+/// carry-over that matches nothing in a sequence diagram) follow `actor_border`
+/// for consistency but are visually inert.
+pub fn seq_style(pal: &SeqPalette) -> String {
+    let mut css = SEQ_STYLE.to_string();
+    let mut sub = |old: &str, new: String| css = css.replace(old, &new);
+
+    // Root text colour (unique: only the root rule pairs font-size with fill).
+    sub(
+        "font-size:16px;fill:#333;}",
+        format!("font-size:16px;fill:{};}}", pal.text_color),
+    );
+    // Actor box, lifeline, actor glyph, label box, popup panel (actor_bkg /
+    // actor_border). `#ECECFF` is only ever actor_bkg; substitute all at once.
+    sub(
+        ".actor{stroke:#9370DB;fill:#ECECFF;stroke-width:1;}",
+        format!(
+            ".actor{{stroke:{};fill:{};stroke-width:1;}}",
+            pal.actor_border, pal.actor_bkg
+        ),
+    );
+    sub(
+        ".actor-line{stroke:#9370DB;}",
+        format!(".actor-line{{stroke:{};}}", pal.actor_border),
+    );
+    sub(
+        ".labelBox{stroke:#9370DB;fill:#ECECFF;filter:none;}",
+        format!(
+            ".labelBox{{stroke:{};fill:{};filter:none;}}",
+            pal.label_border, pal.actor_bkg
+        ),
+    );
+    sub(
+        ".loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:#9370DB;fill:#9370DB;}",
+        format!(
+            ".loopLine{{stroke-width:2px;stroke-dasharray:2,2;stroke:{0};fill:{0};}}",
+            pal.label_border
+        ),
+    );
+    sub(
+        "g rect.rect{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));stroke:#9370DB;}",
+        format!(
+            "g rect.rect{{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));stroke:{};}}",
+            pal.actor_border
+        ),
+    );
+    // Any remaining `#9370DB` is the inert neo carry-over → actor_border.
+    sub("#9370DB", pal.actor_border.to_string());
+    sub("#ECECFF", pal.actor_bkg.to_string());
+
+    // Actor / label / loop / section text.
+    sub(
+        "text.actor>tspan{fill:black;stroke:none;}",
+        format!("text.actor>tspan{{fill:{};stroke:none;}}", pal.content_text),
+    );
+    sub(
+        ".labelText,#my-svg .labelText>tspan{fill:black;stroke:none;}",
+        format!(
+            ".labelText,#my-svg .labelText>tspan{{fill:{};stroke:none;}}",
+            pal.content_text
+        ),
+    );
+    sub(
+        ".loopText,#my-svg .loopText>tspan{fill:black;stroke:none;}",
+        format!(
+            ".loopText,#my-svg .loopText>tspan{{fill:{};stroke:none;}}",
+            pal.content_text
+        ),
+    );
+    sub(
+        ".sectionTitle,#my-svg .sectionTitle>tspan{fill:black;stroke:none;}",
+        format!(
+            ".sectionTitle,#my-svg .sectionTitle>tspan{{fill:{};stroke:none;}}",
+            pal.content_text
+        ),
+    );
+
+    // Message lines / arrowheads / crosshead / message text / sequence-number id.
+    sub(
+        ".messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:#333;}",
+        format!(
+            ".messageLine0{{stroke-width:1.5;stroke-dasharray:none;stroke:{};}}",
+            pal.signal_color
+        ),
+    );
+    sub(
+        ".messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:#333;}",
+        format!(
+            ".messageLine1{{stroke-width:1.5;stroke-dasharray:2,2;stroke:{};}}",
+            pal.signal_color
+        ),
+    );
+    sub(
+        "[id$=\"-arrowhead\"] path{fill:#333;stroke:#333;}",
+        format!(
+            "[id$=\"-arrowhead\"] path{{fill:{0};stroke:{0};}}",
+            pal.signal_color
+        ),
+    );
+    sub(
+        "[id$=\"-crosshead\"] path{fill:#333;stroke:#333;}",
+        format!(
+            "[id$=\"-crosshead\"] path{{fill:{0};stroke:{0};}}",
+            pal.signal_color
+        ),
+    );
+    sub(
+        "[id$=\"-sequencenumber\"]{fill:#333;}",
+        format!("[id$=\"-sequencenumber\"]{{fill:{};}}", pal.signal_color),
+    );
+    sub(
+        ".messageText{fill:#333;stroke:none;}",
+        format!(".messageText{{fill:{};stroke:none;}}", pal.signal_color),
+    );
+
+    // Notes (border/bkg fragment is shared by `.note` and the neo note rule).
+    sub(
+        "stroke:#aaaa33;fill:#fff5ad;",
+        format!("stroke:{};fill:{};", pal.note_border, pal.note_bkg),
+    );
+    sub(
+        ".noteText,#my-svg .noteText>tspan{fill:black;stroke:none;font-weight:normal;}",
+        format!(
+            ".noteText,#my-svg .noteText>tspan{{fill:{};stroke:none;font-weight:normal;}}",
+            pal.note_text
+        ),
+    );
+
+    // Activation bars (three identical rules).
+    sub(
+        "{fill:#f4f4f4;stroke:#666;}",
+        format!(
+            "{{fill:{};stroke:{};}}",
+            pal.activation_bkg, pal.activation_border
+        ),
+    );
+
+    // Sequence-number circle.
+    sub(
+        ".sequenceNumber{fill:white;}",
+        format!(".sequenceNumber{{fill:{};}}", pal.seq_num_fill),
+    );
+
+    css
+}
+
 /// mermaid's default-theme sequence-diagram CSS, verbatim from the oracle.
 /// Presentation attributes on elements (e.g. `stroke="#999"` on lifelines) are
 /// overridden by these stylesheet rules, so emitting them is essential for
 /// visual parity (the structural comparator ignores `<style>` text).
 pub const SEQ_STYLE: &str = r####"#my-svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#my-svg .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#my-svg .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#my-svg .error-icon{fill:#552222;}#my-svg .error-text{fill:#552222;stroke:#552222;}#my-svg .edge-thickness-normal{stroke-width:1px;}#my-svg .edge-thickness-thick{stroke-width:3.5px;}#my-svg .edge-pattern-solid{stroke-dasharray:0;}#my-svg .edge-thickness-invisible{stroke-width:0;fill:none;}#my-svg .edge-pattern-dashed{stroke-dasharray:3;}#my-svg .edge-pattern-dotted{stroke-dasharray:2;}#my-svg .marker{fill:#333333;stroke:#333333;}#my-svg .marker.cross{stroke:#333333;}#my-svg svg{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;}#my-svg p{margin:0;}#my-svg .actor{stroke:#9370DB;fill:#ECECFF;stroke-width:1;}#my-svg rect.actor.outer-path[data-look="neo"]{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg rect.note[data-look="neo"]{stroke:#aaaa33;fill:#fff5ad;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg text.actor>tspan{fill:black;stroke:none;}#my-svg .actor-line{stroke:#9370DB;}#my-svg .innerArc{stroke-width:1.5;stroke-dasharray:none;}#my-svg .messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:#333;}#my-svg .messageLine1{stroke-width:1.5;stroke-dasharray:2,2;stroke:#333;}#my-svg [id$="-arrowhead"] path{fill:#333;stroke:#333;}#my-svg .sequenceNumber{fill:white;}#my-svg [id$="-sequencenumber"]{fill:#333;}#my-svg [id$="-crosshead"] path{fill:#333;stroke:#333;}#my-svg .messageText{fill:#333;stroke:none;}#my-svg .labelBox{stroke:#9370DB;fill:#ECECFF;filter:none;}#my-svg .labelText,#my-svg .labelText>tspan{fill:black;stroke:none;}#my-svg .loopText,#my-svg .loopText>tspan{fill:black;stroke:none;}#my-svg .sectionTitle,#my-svg .sectionTitle>tspan{fill:black;stroke:none;}#my-svg .loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:#9370DB;fill:#9370DB;}#my-svg .note{stroke:#aaaa33;fill:#fff5ad;}#my-svg .noteText,#my-svg .noteText>tspan{fill:black;stroke:none;font-weight:normal;}#my-svg .activation0{fill:#f4f4f4;stroke:#666;}#my-svg .activation1{fill:#f4f4f4;stroke:#666;}#my-svg .activation2{fill:#f4f4f4;stroke:#666;}#my-svg .actorPopupMenu{position:absolute;}#my-svg .actorPopupMenuPanel{position:absolute;fill:#ECECFF;box-shadow:0px 8px 16px 0px rgba(0,0,0,0.2);filter:drop-shadow(3px 5px 2px rgb(0 0 0 / 0.4));}#my-svg .actor-man circle,#my-svg line{fill:#ECECFF;stroke-width:2px;}#my-svg g rect.rect{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));stroke:#9370DB;}#my-svg .node .neo-node{stroke:#9370DB;}#my-svg [data-look="neo"].node rect,#my-svg [data-look="neo"].cluster rect,#my-svg [data-look="neo"].node polygon{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg [data-look="neo"].node path{stroke:#9370DB;stroke-width:1px;}#my-svg [data-look="neo"].node .outer-path{filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg [data-look="neo"].node .neo-line path{stroke:#9370DB;filter:none;}#my-svg [data-look="neo"].node circle{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg [data-look="neo"].node circle .state-start{fill:#000000;}#my-svg [data-look="neo"].icon-shape .icon{fill:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg [data-look="neo"].icon-shape .icon-neo path{stroke:#9370DB;filter:drop-shadow(1px 2px 2px rgba(185, 185, 185, 1));}#my-svg :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}"####;
+
+#[cfg(test)]
+mod tests {
+    use super::seq_style;
+    use crate::ir::Theme;
+
+    #[test]
+    fn default_palette_reproduces_const_byte_for_byte() {
+        // The default sequence render is diffed against the oracle, so the
+        // default palette must rebuild SEQ_STYLE exactly.
+        assert_eq!(seq_style(&Theme::Default.seq_palette()), super::SEQ_STYLE);
+    }
+
+    #[test]
+    fn dark_palette_repaints_every_role() {
+        let css = seq_style(&Theme::Dark.seq_palette());
+        // Dark repaints actor/lifeline/label borders to #ccc and boxes to
+        // #1f2020; none of the default-theme purple survives.
+        assert!(!css.contains("#9370DB"));
+        assert!(!css.contains("#ECECFF"));
+        assert!(css.contains(".actor{stroke:#ccc;fill:#1f2020;stroke-width:1;}"));
+        assert!(
+            css.contains(".messageLine0{stroke-width:1.5;stroke-dasharray:none;stroke:lightgrey;}")
+        );
+        assert!(css.contains(".sequenceNumber{fill:black;}"));
+        // The theme-invariant marker carry-over (#333333) is untouched.
+        assert!(css.contains(".marker{fill:#333333;stroke:#333333;}"));
+    }
+
+    #[test]
+    fn forest_splits_actor_and_label_borders() {
+        // Forest is the theme where labelBox/loopLine (#326932) differ from the
+        // actor border (an hsl) — proves the roles are substituted separately.
+        let css = seq_style(&Theme::Forest.seq_palette());
+        assert!(css.contains(".labelBox{stroke:#326932;fill:#cde498;filter:none;}"));
+        assert!(css.contains(
+            ".loopLine{stroke-width:2px;stroke-dasharray:2,2;stroke:#326932;fill:#326932;}"
+        ));
+        assert!(css.contains(".actor{stroke:hsl(78.1578947368, 58.4615384615%, 54.5098039216%);fill:#cde498;stroke-width:1;}"));
+    }
+}
